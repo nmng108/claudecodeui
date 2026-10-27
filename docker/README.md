@@ -29,7 +29,7 @@ sbx secret set -g anthropic
 ### 3. Launch Claude Code
 
 ```bash
-npx @cloudcli-ai/cloudcli@latest sandbox ~/my-project
+npx @namng108/cloudcli@latest sandbox ~/my-project
 ```
 
 Open **http://localhost:3001**. Set a password on first visit. Start building.
@@ -41,7 +41,7 @@ Store the matching API key and pass `--agent`:
 ```bash
 # OpenAI Codex
 sbx secret set -g openai
-npx @cloudcli-ai/cloudcli@latest sandbox ~/my-project --agent codex
+npx @namng108/cloudcli@latest sandbox ~/my-project --agent codex
 ```
 
 ### Available templates
@@ -63,7 +63,7 @@ sbx rm my-project                    # Remove everything
 sbx exec my-project bash             # Open a shell inside the sandbox
 ```
 
-If you install CloudCLI globally (`npm install -g @cloudcli-ai/cloudcli`), you can also use:
+If you install CloudCLI globally (`npm install -g @namng108/cloudcli`), you can also use:
 
 ```bash
 cloudcli sandbox ls
@@ -87,7 +87,7 @@ Your project directory is mounted bidirectionally — edits propagate in real ti
 Set variables at creation time with `--env`:
 
 ```bash
-npx @cloudcli-ai/cloudcli@latest sandbox ~/my-project --env SERVER_PORT=8080
+npx @namng108/cloudcli@latest sandbox ~/my-project --env SERVER_PORT=8080
 ```
 
 Or inside a running sandbox:

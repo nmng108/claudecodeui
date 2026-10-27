@@ -1,7 +1,7 @@
 # Kiro Work: Task List
 
 - [x] **T1** Branch `feature/kiro`, docs in `docs/kiro/`.
-- [ ] **T2** Rename package to `@namng108/cloudcli` 1.38.0, update all references, `npm pack --dry-run`.
+- [x] **T2** Rename package to `@namng108/cloudcli` 1.38.0, update all references, `npm pack --dry-run`.
 - [ ] **T3** Kiro provider id, registry, auth, API-key store, save/clear routes, tests.
 - [ ] **T4** `KiroAcpClient` and runtime (stream, permissions, cancel, crash), fake ACP agent tests.
 - [ ] **T5** Models/agents, sessions history, synchronizer, tests.

@@ -77,13 +77,13 @@
 **npx**로 즉시 CloudCLI UI를 실행하세요 (Node.js v22+ 필요):
 
 ```bash
-npx @cloudcli-ai/cloudcli
+npx @namng108/cloudcli
 ```
 
 **정기적으로 사용한다면 전역 설치:**
 
 ```bash
-npm install -g @cloudcli-ai/cloudcli
+npm install -g @namng108/cloudcli
 cloudcli
 ```
 
@@ -96,7 +96,7 @@ cloudcli
 하이퍼바이저 수준 격리로 에이전트를 샌드박스에서 실행합니다. 기본 에이전트는 Claude Code입니다. [`sbx` CLI](https://docs.docker.com/ai/sandboxes/get-started/)가 필요합니다.
 
 ```
-npx @cloudcli-ai/cloudcli@latest sandbox ~/my-project
+npx @namng108/cloudcli@latest sandbox ~/my-project
 ```
 
 Claude Code, Codex를 지원합니다. 자세한 내용은 [샌드박스 문서](../docker/)를 참고하세요.
@@ -111,7 +111,7 @@ CloudCLI UI는 CloudCLI Cloud를 구동하는 오픈 소스 UI 계층입니다. 
 |---|---|---|
 | **적합한 대상** | 로컬 에이전트 세션을 위한 전체 UI가 필요한 개발자 | 어디서든 접근 가능한 클라우드에서 에이전트를 운영하고자 하는 팀 및 개발자 |
 | **접근 방법** | `[yourip]:port`를 통해 브라우저 접속 | 브라우저, IDE, REST API, n8n |
-| **설정** | `npx @cloudcli-ai/cloudcli` | 설정 불필요 |
+| **설정** | `npx @namng108/cloudcli` | 설정 불필요 |
 | **기기 유지 필요 여부** | 예 (머신 켜둬야 함) | 아니오 |
 | **모바일 접근** | 네트워크 내 브라우저 | 모든 기기 (네이티브 앱 예정) |
 | **세션 접근** | `~/.claude`에서 자동 발견 | 클라우드 환경 내 세션 |

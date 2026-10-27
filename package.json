@@ -1,7 +1,10 @@
 {
-  "name": "@cloudcli-ai/cloudcli",
-  "version": "1.37.6",
+  "name": "@namng108/cloudcli",
+  "version": "1.38.0",
   "productName": "CloudCLI",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "A web-based UI for Claude Code CLI",
   "type": "module",
   "main": "dist-server/server/index.js",

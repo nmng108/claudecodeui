@@ -81,13 +81,13 @@ Cara tercepat untuk memulai — tanpa setup lokal. Dapatkan lingkungan pengemban
 Coba CloudCLI UI langsung dengan **npx** (memerlukan **Node.js** v22+):
 
 ```
-npx @cloudcli-ai/cloudcli
+npx @namng108/cloudcli
 ```
 
 Atau instal secara **global** untuk penggunaan rutin:
 
 ```
-npm install -g @cloudcli-ai/cloudcli
+npm install -g @namng108/cloudcli
 cloudcli
 ```
 
@@ -100,7 +100,7 @@ Kunjungi **[dokumentasi →](https://cloudcli.ai/docs)** untuk opsi konfigurasi 
 Jalankan agent di sandbox terisolasi dengan isolasi tingkat hypervisor. Claude Code dijalankan secara default. Memerlukan [`sbx` CLI](https://docs.docker.com/ai/sandboxes/get-started/).
 
 ```
-npx @cloudcli-ai/cloudcli@latest sandbox ~/my-project
+npx @namng108/cloudcli@latest sandbox ~/my-project
 ```
 
 Mendukung Claude Code dan Codex. Lihat [dokumentasi sandbox](../docker/) untuk setup dan opsi tingkat lanjut.
@@ -126,7 +126,7 @@ CloudCLI UI adalah lapisan UI open source yang menjadi dasar CloudCLI Cloud. And
 |---|---|---|---|
 | **Paling cocok untuk** | Session agent lokal di mesin Anda sendiri | Agent terisolasi dengan IDE web/mobile | Tim yang ingin menjalankan agent di cloud |
 | **Cara mengakses** | Browser melalui `[yourip]:port` | Browser melalui `localhost:port` | Browser, IDE apa pun, REST API, n8n |
-| **Setup** | `npx @cloudcli-ai/cloudcli` | `npx @cloudcli-ai/cloudcli@latest sandbox ~/project` | Tidak perlu setup |
+| **Setup** | `npx @namng108/cloudcli` | `npx @namng108/cloudcli@latest sandbox ~/project` | Tidak perlu setup |
 | **Isolasi** | Berjalan di host Anda | Sandbox tingkat hypervisor (microVM) | Isolasi cloud penuh |
 | **Mesin harus tetap menyala** | Ya | Ya | Tidak |
 | **Akses mobile** | Browser apa pun di jaringan Anda | Browser apa pun di jaringan Anda | Perangkat apa pun |

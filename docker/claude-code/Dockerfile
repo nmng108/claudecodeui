@@ -6,7 +6,7 @@ RUN chmod +x /tmp/install-cloudcli.sh && /tmp/install-cloudcli.sh
 
 USER agent
 RUN --mount=type=cache,target=/tmp/npm-cache,sharing=locked,mode=0777 \
-    npm install -g @cloudcli-ai/cloudcli \
+    npm install -g @namng108/cloudcli \
       --cache=/tmp/npm-cache \
       --fetch-retries=5 \
       --fetch-retry-mintimeout=20000 \
