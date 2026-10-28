@@ -64,6 +64,17 @@ test('a switch made elsewhere reaches the panel', () => {
   assert.equal(result.current, 'opencode');
 });
 
+test('kiro is a selectable provider', () => {
+  // T7: kiro joins claude/cursor/codex/opencode as a selectable provider id.
+  const { result } = renderHook(() => useSelectedProvider());
+
+  act(() => {
+    writeSelectedProvider('kiro');
+  });
+
+  assert.equal(result.current, 'kiro');
+});
+
 test('an unrelated preference change does not change the reported provider', () => {
   writeSelectedProvider('codex');
   const { result } = renderHook(() => useSelectedProvider());

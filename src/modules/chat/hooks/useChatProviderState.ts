@@ -22,6 +22,9 @@ const FALLBACK_PROVIDER_EFFORT_VALUES: Partial<Record<LLMProvider, readonly stri
   // valid Max/Ultra selection from being reset during catalog hydration.
   codex: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
   opencode: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
+  // Kiro's effort support is not yet known (runtime lands in T4); no fallback
+  // values are listed, so getSupportsEffortForProvider reports false until the
+  // backend's own model catalog says otherwise.
 };
 
 const toProviderEffortOptions = (
@@ -33,9 +36,13 @@ const FALLBACK_DEFAULT_MODEL: Record<LLMProvider, string> = {
   cursor: 'gpt-5.3-codex',
   codex: 'gpt-5.4',
   opencode: 'anthropic/claude-sonnet-4-5',
+  // Kiro's models/agents come from the ACP `session/new` response (T5); until
+  // the backend's own catalog lands, this fallback just needs to be distinct
+  // from every other provider's so default-model bookkeeping stays per-provider.
+  kiro: 'kiro-default',
 };
 
-const PROVIDERS: LLMProvider[] = ['claude', 'cursor', 'codex', 'opencode'];
+const PROVIDERS: LLMProvider[] = ['claude', 'cursor', 'codex', 'opencode', 'kiro'];
 
 /** localStorage key holding the user's default model for one provider. */
 const providerModelStorageKey = (provider: LLMProvider): string => `${provider}-model`;
@@ -51,6 +58,9 @@ const FALLBACK_PERMISSION_MODES: Record<LLMProvider, PermissionMode[]> = {
   cursor: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
   codex: ['default', 'acceptEdits', 'bypassPermissions'],
   opencode: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
+  // Kiro's runtime (T4) has not landed yet; `default` is the only mode ACP
+  // guarantees until the backend capability matrix reports more.
+  kiro: ['default'],
 };
 
 type ProviderCapabilities = {

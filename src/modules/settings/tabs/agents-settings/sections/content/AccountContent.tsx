@@ -55,6 +55,15 @@ const agentConfig: Record<AgentProvider, AgentVisualConfig> = {
     subtextClass: 'text-zinc-700 dark:text-zinc-300',
     buttonClass: 'bg-zinc-900 hover:bg-zinc-800 active:bg-zinc-950 dark:bg-zinc-700 dark:hover:bg-zinc-600',
   },
+  kiro: {
+    name: 'Kiro',
+    description: 'Kiro CLI assistant',
+    bgClass: 'bg-fuchsia-50 dark:bg-fuchsia-900/20',
+    borderClass: 'border-fuchsia-200 dark:border-fuchsia-800',
+    textClass: 'text-fuchsia-900 dark:text-fuchsia-100',
+    subtextClass: 'text-fuchsia-700 dark:text-fuchsia-300',
+    buttonClass: 'bg-fuchsia-600 hover:bg-fuchsia-700 active:bg-fuchsia-800',
+  },
 };
 
 type SubscriptionOverrideNoticeProps = {
@@ -161,7 +170,7 @@ export default function AccountContent({ agent, authStatus, onLogin }: AccountCo
             subtextClass={config.subtextClass}
           />
 
-          {authStatus.method !== 'api_key' && (
+          {authStatus.method !== 'api_key' && agent !== 'kiro' && (
             <div className="border-t border-border/50 pt-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -181,6 +190,29 @@ export default function AccountContent({ agent, authStatus, onLogin }: AccountCo
                 >
                   <LogIn className="mr-2 h-4 w-4" />
                   {authStatus.authenticated ? t('agents.login.reLoginButton') : t('agents.login.button')}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {agent === 'kiro' && (
+            <div className="border-t border-border/50 pt-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className={`font-medium ${config.textClass}`}>
+                    {t('agents.kiro.apiKey.manageTitle')}
+                  </div>
+                  <div className={`text-sm ${config.subtextClass}`}>
+                    {t('agents.kiro.apiKey.manageDescription')}
+                  </div>
+                </div>
+                <Button
+                  onClick={onLogin}
+                  className={`${config.buttonClass} text-white`}
+                  size="sm"
+                >
+                  <LogIn className="mr-2 h-4 w-4" />
+                  {t('agents.kiro.apiKey.manageButton')}
                 </Button>
               </div>
             </div>

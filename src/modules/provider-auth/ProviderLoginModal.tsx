@@ -3,7 +3,8 @@ import { X } from 'lucide-react';
 
 import { StandaloneShell } from '@/modules/standalone-shell';
 import { IS_PLATFORM } from '@/shared/utils';
-import type { LLMProvider } from '@/shared/types';
+import type { LLMProvider, ProviderAuthStatus } from '@/shared/types';
+import KiroApiKeyPanel from '@/modules/provider-auth/KiroApiKeyPanel';
 
 /**
  * For empty shell instances where no project is provided,
@@ -28,6 +29,8 @@ type ProviderLoginModalProps = {
   onComplete?: (exitCode: number) => void;
   customCommand?: string;
   isAuthenticated?: boolean;
+  /** Required for `kiro`, which renders an API-key form instead of a CLI login shell and needs the current masked state. */
+  authStatus?: ProviderAuthStatus;
 };
 
 const getProviderCommand = ({
@@ -67,7 +70,16 @@ const getProviderTitle = (provider: LLMProvider) => {
   if (provider === 'cursor') return 'Cursor CLI Login';
   if (provider === 'codex') return 'Codex CLI Login';
   if (provider === 'opencode') return 'OpenCode CLI Login';
+  if (provider === 'kiro') return 'Kiro API Key';
   return 'Claude CLI Login';
+};
+
+const EMPTY_KIRO_AUTH_STATUS: ProviderAuthStatus = {
+  authenticated: false,
+  email: null,
+  method: null,
+  error: null,
+  loading: false,
 };
 
 /** Used by the onboarding and settings modules to run a provider's CLI login command in an embedded shell. */
@@ -78,19 +90,52 @@ export default function ProviderLoginModal({
   onComplete,
   customCommand,
   isAuthenticated = false,
+  authStatus,
 }: ProviderLoginModalProps) {
   const { t } = useTranslation();
   if (!isOpen) {
     return null;
   }
 
-  const command = getProviderCommand({ provider, customCommand, isAuthenticated });
   const title = getProviderTitle(provider);
 
   const handleComplete = (exitCode: number) => {
     onComplete?.(exitCode);
     // Keep the modal open so users can read terminal output before closing.
   };
+
+  // Kiro has no CLI login command to run in a shell: it authenticates with a
+  // pasted API key saved through POST/DELETE /api/providers/kiro/api-key.
+  if (provider === 'kiro') {
+    return (
+      <div
+        data-escape-layer
+        className="fixed inset-0 z-[9999] flex items-center justify-center bg-black bg-opacity-50 max-md:items-stretch max-md:justify-stretch"
+      >
+        <div className="flex max-h-[90vh] w-full max-w-lg flex-col rounded-lg bg-white shadow-xl dark:bg-gray-800 max-md:m-0 max-md:h-full max-md:max-w-none max-md:rounded-none md:m-4">
+          <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h3>
+            <button
+              onClick={onClose}
+              className="text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-gray-300"
+              aria-label={t('common:misc.closeLoginModal')}
+            >
+              <X className="h-6 w-6" />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto">
+            <KiroApiKeyPanel
+              authStatus={authStatus ?? EMPTY_KIRO_AUTH_STATUS}
+              onChanged={() => handleComplete(0)}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const command = getProviderCommand({ provider, customCommand, isAuthenticated });
 
   return (
     <div

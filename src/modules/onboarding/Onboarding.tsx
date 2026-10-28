@@ -250,6 +250,7 @@ export default function Onboarding({ onComplete }: OnboardingProps) {
           onClose={() => setActiveLoginProvider(null)}
           provider={activeLoginProvider}
           onComplete={handleLoginComplete}
+          authStatus={providerAuthStatus[activeLoginProvider]}
         />
       )}
     </>

@@ -401,9 +401,34 @@
       },
       "opencode": {
         "description": "OpenCode CLI assistant"
+      },
+      "kiro": {
+        "description": "Kiro CLI assistant"
       }
     },
     "connectionStatus": "Connection Status",
+    "kiro": {
+      "apiKey": {
+        "title": "Kiro API key",
+        "description": "Kiro CLI authenticates with an API key instead of a browser login.",
+        "generateLink": "Generate a key at app.kiro.dev",
+        "currentState": "Current state",
+        "managedByEnvironment": "Managed by the KIRO_API_KEY environment variable",
+        "environmentKeyCannotBeCleared": "This key is set by the server environment and cannot be cleared from the UI.",
+        "noKeyStored": "No API key stored",
+        "inputLabel": "API key",
+        "inputPlaceholder": "Paste your Kiro API key",
+        "saveButton": "Save",
+        "clearButton": "Clear",
+        "manageTitle": "Kiro API key",
+        "manageDescription": "Save or clear the API key kiro-cli uses to authenticate",
+        "manageButton": "Manage API key",
+        "errors": {
+          "saveFailed": "Unable to save the Kiro API key.",
+          "clearFailed": "Unable to clear the Kiro API key."
+        }
+      }
+    },
     "cli": {
       "title": "CLI version",
       "checking": "Checking version…",
@@ -559,7 +584,8 @@
       "claude": "Model Context Protocol servers provide additional tools and data sources to Claude",
       "cursor": "Model Context Protocol servers provide additional tools and data sources to Cursor",
       "codex": "Model Context Protocol servers provide additional tools and data sources to Codex",
-      "opencode": "Model Context Protocol servers provide additional tools and data sources to OpenCode"
+      "opencode": "Model Context Protocol servers provide additional tools and data sources to OpenCode",
+      "kiro": "Model Context Protocol servers provide additional tools and data sources to Kiro"
     },
     "addButton": "Add MCP Server",
     "empty": "No MCP servers configured",

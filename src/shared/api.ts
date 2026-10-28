@@ -425,6 +425,13 @@ export const api = {
       post(`/api/providers/${encodeURIComponent(provider)}/cli/update`),
     claudeSettingsPermissions: () => get('/api/providers/claude/settings-permissions'),
 
+    // Kiro-only: pastes/clears the API key the server injects as KIRO_API_KEY
+    // when spawning `kiro-cli acp`. The server never echoes the key back.
+    saveApiKey: (provider: string, apiKey: string) =>
+      post(`/api/providers/${encodeURIComponent(provider)}/api-key`, { apiKey }),
+    deleteApiKey: (provider: string) =>
+      del(`/api/providers/${encodeURIComponent(provider)}/api-key`),
+
     models: (provider: string) => get(`/api/providers/${provider}/models`),
     createModel: (provider: string, input: unknown) =>
       post(`/api/providers/${provider}/models`, input),

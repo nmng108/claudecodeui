@@ -75,6 +75,20 @@ test('each provider gets its own model from its own storage key', async () => {
   assert.equal(result.current.providerModels.opencode, 'opencode-stored');
 });
 
+test('kiro is included in provider selection, with its own default model and permission mode', async () => {
+  const { result } = await renderProviderState();
+
+  await waitFor(() => {
+    assert.ok(result.current.providerModels.kiro);
+  });
+
+  assert.equal(result.current.providerModels.kiro, 'kiro-default');
+  // Kiro's runtime (T4) is not landed yet, so only 'default' is a valid mode;
+  // requesting anything else must fall back to it rather than error.
+  assert.equal(result.current.resolvePermissionModeForProvider('kiro', 'default'), 'default');
+  assert.equal(result.current.resolvePermissionModeForProvider('kiro', 'plan'), 'default');
+});
+
 test('a provider with no stored model falls back to its own default, not another provider’s', async () => {
   const { result } = await renderProviderState();
 

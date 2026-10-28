@@ -287,6 +287,7 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
         provider={loginProvider || 'claude'}
         onComplete={handleLoginComplete}
         isAuthenticated={isAuthenticated}
+        authStatus={loginProvider ? providerAuthStatus[loginProvider] : undefined}
       />
 
     </div>

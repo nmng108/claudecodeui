@@ -37,6 +37,13 @@ const providerCards = [
     iconContainerClassName: 'bg-zinc-100 dark:bg-zinc-800',
     loginButtonClassName: 'bg-zinc-800 hover:bg-zinc-900 dark:bg-zinc-700 dark:hover:bg-zinc-600',
   },
+  {
+    provider: 'kiro' as const,
+    title: 'Kiro',
+    connectedClassName: 'bg-fuchsia-50 dark:bg-fuchsia-900/20 border-fuchsia-200 dark:border-fuchsia-800',
+    iconContainerClassName: 'bg-fuchsia-100 dark:bg-fuchsia-900/30',
+    loginButtonClassName: 'bg-fuchsia-600 hover:bg-fuchsia-700',
+  },
 ];
 
 /** Rendered by Onboarding as its second step, listing every CLI provider the user can log into. */
