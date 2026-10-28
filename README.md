@@ -105,6 +105,26 @@ npx @namng108/cloudcli@latest sandbox ~/my-project
 
 Supports Claude Code and Codex. See the [sandbox docs](docker/) for setup and advanced options.
 
+#### Standard Docker Image
+
+A plain (non-sandboxed) Docker image for environments where the `sbx` microVM sandbox isn't available or desired — e.g. CI, a VPS, or a host without nested virtualization. It runs CloudCLI, Claude Code and Kiro CLI directly in the container as a regular process, with no hypervisor-level isolation.
+
+```bash
+docker compose up --build
+```
+
+Or without Compose:
+
+```bash
+docker build -f docker/standard/Dockerfile -t cloudcli:standard docker/
+docker run -p 3001:3001 -v $(pwd):/workspace \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  -e KIRO_API_KEY=... \
+  cloudcli:standard
+```
+
+See [docker/README.md](docker/README.md#standard-non-sandbox-image) for volumes, API key handling and an Alpine/musl compatibility note.
+
 ### Desktop Companion App
 
 CloudCLI Desktop is an optional native companion for CloudCLI Cloud and Local CloudCLI. It ships from this repository's GitHub Releases and keeps CloudCLI available from your menu bar or tray.
@@ -122,21 +142,21 @@ Use it to open CloudCLI Cloud environments, switch between local and remote work
 
 CloudCLI UI is the open source UI layer that powers CloudCLI Cloud. You can self-host it on your own machine, run it in a Docker sandbox for isolation, or use CloudCLI Cloud for a fully managed environment.
 
-| | Self-Hosted (npm) | Self-Hosted (Docker Sandbox) *(Experimental)* | CloudCLI Cloud |
-|---|---|---|---|
-| **Best for** | Local agent sessions on your own machine | Isolated agents with web/mobile IDE | Teams who want agents in the cloud |
-| **How you access it** | Browser via `[yourip]:port` | Browser via `localhost:port` | Browser, any IDE, REST API, n8n |
-| **Setup** | `npx @namng108/cloudcli` | `npx @namng108/cloudcli@latest sandbox ~/project` | No setup required |
-| **Isolation** | Runs on your host | Hypervisor-level sandbox (microVM) | Full cloud isolation |
-| **Machine needs to stay on** | Yes | Yes | No |
-| **Mobile access** | Any browser on your network | Any browser on your network | Any device |
-| **Desktop companion** | Optional. Choose Local CloudCLI | Optional. Choose Local CloudCLI | Optional. Opens cloud environments |
-| **Agents supported** | Claude Code, Cursor CLI, Codex | Claude Code, Codex | Claude Code, Cursor CLI, Codex |
-| **File explorer and Git** | Yes | Yes | Yes |
-| **MCP configuration** | Synced with `~/.claude` | Managed via UI | Managed via UI |
-| **REST API** | Yes | Yes | Yes |
-| **Team sharing** | No | No | Yes |
-| **Platform cost** | Free, open source | Free, open source | Starts at €7/month |
+| | Self-Hosted (npm) | Self-Hosted (Standard Docker) | Self-Hosted (Docker Sandbox) *(Experimental)* | CloudCLI Cloud |
+|---|---|---|---|---|
+| **Best for** | Local agent sessions on your own machine | Running CloudCLI as a container, no sandbox | Isolated agents with web/mobile IDE | Teams who want agents in the cloud |
+| **How you access it** | Browser via `[yourip]:port` | Browser via `localhost:port` | Browser via `localhost:port` | Browser, any IDE, REST API, n8n |
+| **Setup** | `npx @namng108/cloudcli` | `docker compose up --build` | `npx @namng108/cloudcli@latest sandbox ~/project` | No setup required |
+| **Isolation** | Runs on your host | Container (no hypervisor isolation) | Hypervisor-level sandbox (microVM) | Full cloud isolation |
+| **Machine needs to stay on** | Yes | Yes | Yes | No |
+| **Mobile access** | Any browser on your network | Any browser on your network | Any browser on your network | Any device |
+| **Desktop companion** | Optional. Choose Local CloudCLI | Optional. Choose Local CloudCLI | Optional. Choose Local CloudCLI | Optional. Opens cloud environments |
+| **Agents supported** | Claude Code, Cursor CLI, Codex | Claude Code, Kiro | Claude Code, Codex | Claude Code, Cursor CLI, Codex |
+| **File explorer and Git** | Yes | Yes | Yes | Yes |
+| **MCP configuration** | Synced with `~/.claude` | Synced with `~/.claude` / `~/.kiro` | Managed via UI | Managed via UI |
+| **REST API** | Yes | Yes | Yes | Yes |
+| **Team sharing** | No | No | No | Yes |
+| **Platform cost** | Free, open source | Free, open source | Free, open source | Starts at €7/month |
 
 > All options use your own AI subscriptions (Claude, Cursor, etc.) — CloudCLI provides the environment, not the AI.
 

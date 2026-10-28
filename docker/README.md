@@ -143,6 +143,75 @@ sbx policy allow network localhost:11434
 
 The web UI itself doesn't need a policy — access it via `sbx ports`.
 
+---
+
+## Standard (non-sandbox) image
+
+An alternative to the Docker Sandbox templates above, for hosts where the `sbx` microVM sandbox isn't available (e.g. no nested virtualization) or isn't needed. `docker/standard/Dockerfile` runs CloudCLI, Claude Code and Kiro CLI as regular processes in a single container — no hypervisor isolation, no `sbx` CLI required.
+
+### Build & run
+
+Build context must be `docker/` (same as the sandbox templates):
+
+```bash
+docker build -f docker/standard/Dockerfile -t cloudcli:standard docker/
+docker run -d \
+  -p 3001:3001 \
+  -v "$(pwd)":/workspace \
+  -v claude-home:/home/agent/.claude \
+  -v kiro-home:/home/agent/.kiro \
+  -v cloudcli-home:/home/agent/.cloudcli \
+  -e ANTHROPIC_API_KEY=sk-ant-... \
+  -e KIRO_API_KEY=... \
+  --name cloudcli-standard \
+  cloudcli:standard
+```
+
+Open **http://localhost:3001**.
+
+### docker-compose
+
+The repo root [`docker-compose.yml`](../docker-compose.yml) builds the same image and wires up the volumes and port mapping:
+
+```bash
+docker compose up --build
+```
+
+Build args:
+
+| Arg | Default | Description |
+|-----|---------|-------------|
+| `CLOUDCLI_VERSION` | `latest` | npm dist-tag or version of `@namng108/cloudcli` to install |
+| `NPM_REGISTRY` | `https://registry.npmjs.org` | Override for a private/mirrored npm registry |
+
+### API keys
+
+No keys are baked into the image. Pass them at `docker run`/`compose up` time as environment variables (see `KIRO_API_KEY` / `ANTHROPIC_API_KEY` in `docker-compose.yml`, which default to empty via `${VAR:-}` if unset):
+
+- `ANTHROPIC_API_KEY` — used by Claude Code.
+- `KIRO_API_KEY` — used by Kiro CLI; CloudCLI also lets you paste a Kiro API key in the UI, which is stored in `~/.cloudcli/kiro-auth.json` inside the `cloudcli-home` volume instead.
+
+### Volumes
+
+| Volume | Container path | Purpose |
+|--------|----------------|---------|
+| workspace | `/workspace` | Your project files |
+| `claude-home` | `/home/agent/.claude` | Claude Code sessions/config |
+| `kiro-home` | `/home/agent/.kiro` | Kiro CLI sessions/config |
+| `cloudcli-home` | `/home/agent/.cloudcli` | CloudCLI auth DB and stored API keys |
+
+### musl (Alpine) caveat
+
+The image is built on `node:24-alpine3.24` (musl libc, not glibc):
+
+- **Kiro CLI**: the official installer (`curl -fsSL https://cli.kiro.dev/install | bash`) detects musl automatically (checks `/lib/libc.musl-*.so.1` and `ldd` output) and downloads the musl-native build. No glibc compatibility shim (`gcompat`) is needed. It installs to `~/.local/bin`, which the image adds to `PATH`.
+- **Claude Code**: its bundled `ripgrep` binary is glibc-linked and fails to load on musl. The image sets `USE_BUILTIN_RIPGREP=0` and installs the `ripgrep` apk package so Claude Code shells out to the system `rg` instead.
+- **Native npm modules** (`node-pty`, `better-sqlite3`, `bcrypt`): built from source against musl using the `build-base`/`python3` apk packages; no prebuilt glibc binaries are used.
+
+### Health & readiness
+
+`HEALTHCHECK` polls `GET /health` on `SERVER_PORT` (default `3001`). `HOST` is fixed to `0.0.0.0` in the image so the server is reachable from outside the container; do not override it to `127.0.0.1` or port publishing will stop working.
+
 ## Links
 
 - [CloudCLI Cloud](https://cloudcli.ai) — fully managed, no setup required

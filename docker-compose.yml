@@ -1,0 +1,32 @@
+services:
+  cloudcli:
+    build:
+      context: ./docker
+      dockerfile: standard/Dockerfile
+      args:
+        CLOUDCLI_VERSION: ${CLOUDCLI_VERSION:-latest}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
+    image: cloudcli:standard
+    container_name: cloudcli-standard
+    ports:
+      - '3001:3001'
+    environment:
+      HOST: 0.0.0.0
+      SERVER_PORT: 3001
+      # Supply these from your shell or a local .env file (never commit real
+      # keys). Left unset here on purpose — see docker/README.md.
+      KIRO_API_KEY: ${KIRO_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      # Project files the agent reads/writes.
+      - ${WORKSPACE_PATH:-./}:/workspace
+      # Persisted CLI credentials/config across container restarts.
+      - claude-home:/home/agent/.claude
+      - kiro-home:/home/agent/.kiro
+      - cloudcli-home:/home/agent/.cloudcli
+    restart: unless-stopped
+
+volumes:
+  claude-home:
+  kiro-home:
+  cloudcli-home:
