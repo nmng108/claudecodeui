@@ -313,8 +313,16 @@ test('providerMcpService global adder writes to all providers and rejects unsupp
       workspacePath,
     });
 
-    assert.equal(globalResult.length, 4);
-    assert.ok(globalResult.every((entry) => entry.created === true));
+    assert.equal(globalResult.length, 5);
+    // Kiro's MCP adapter is still a stub (no scopes/transports declared
+    // supported until its task lands), so it reports a caught failure here
+    // while every other provider succeeds.
+    const [kiroResult, ...otherResults] = globalResult
+      .slice()
+      .sort((a, b) => (a.provider === 'kiro' ? -1 : b.provider === 'kiro' ? 1 : 0));
+    assert.equal(kiroResult.provider, 'kiro');
+    assert.equal(kiroResult.created, false);
+    assert.ok(otherResults.every((entry) => entry.created === true));
 
     const claudeProject = await readJson(path.join(workspacePath, '.mcp.json'));
     assert.ok((claudeProject.mcpServers as Record<string, unknown>)['global-http']);

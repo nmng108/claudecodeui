@@ -10,6 +10,11 @@ import { providerTokenUsageService } from '@/modules/providers/services/provider
 import { providerSkillsService } from '@/modules/providers/services/skills.service.js';
 import { sessionConversationsSearchService } from '@/modules/providers/services/session-conversations-search.service.js';
 import { sessionsService } from '@/modules/providers/services/sessions.service.js';
+import {
+  clearKiroApiKey,
+  getKiroApiKeyState,
+  saveKiroApiKey,
+} from '@/modules/providers/list/kiro/kiro-api-key.store.js';
 import type {
   CustomProviderModelEffort,
   CustomProviderModelInput,
@@ -319,6 +324,7 @@ const parseProvider = (value: unknown): LLMProvider => {
     || normalized === 'codex'
     || normalized === 'cursor'
     || normalized === 'opencode'
+    || normalized === 'kiro'
   ) {
     return normalized;
   }
@@ -630,6 +636,49 @@ router.get(
     const provider = parseProvider(req.params.provider);
     const status = await providerAuthService.getProviderAuthStatus(provider);
     res.json(createApiSuccessResponse(status));
+  }),
+);
+
+const parseKiroApiKeyPayload = (payload: unknown): string => {
+  if (!payload || typeof payload !== 'object') {
+    throw new AppError('Request body must be an object.', {
+      code: 'INVALID_REQUEST_BODY',
+      statusCode: 400,
+    });
+  }
+
+  const body = payload as Record<string, unknown>;
+  if (typeof body.apiKey !== 'string' || !body.apiKey.trim()) {
+    throw new AppError('apiKey is required.', {
+      code: 'KIRO_API_KEY_REQUIRED',
+      statusCode: 400,
+    });
+  }
+
+  return body.apiKey;
+};
+
+/**
+ * Saves the Kiro API key to `~/.cloudcli/kiro-auth.json`. The response never
+ * contains the key: only its masked form and source, mirroring auth status.
+ */
+router.post(
+  '/kiro/api-key',
+  asyncHandler(async (req: Request, res: Response) => {
+    const apiKey = parseKiroApiKeyPayload(req.body);
+    await saveKiroApiKey(apiKey);
+    const state = await getKiroApiKeyState();
+    res.json(createApiSuccessResponse({ provider: 'kiro', source: state.source, masked: state.masked }));
+  }),
+);
+
+/** Clears the stored Kiro API key file. A pre-set `KIRO_API_KEY` env var is unaffected. */
+router.delete(
+  '/kiro/api-key',
+  asyncHandler(async (_req: Request, res: Response) => {
+    await clearKiroApiKey();
+    const state = await getKiroApiKeyState();
+    res.json(createApiSuccessResponse({ provider: 'kiro', source: state.source, masked: state.masked }));
   }),
 );
 

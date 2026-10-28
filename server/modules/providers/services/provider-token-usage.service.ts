@@ -448,6 +448,22 @@ export function createProviderTokenUsageService(
         };
       }
 
+      if (session.provider === 'kiro') {
+        // `_kiro.dev/metadata` reports context usage once the ACP runtime
+        // (T4) and token-usage task (T6) land; until then this reports
+        // "unsupported" rather than reading a Claude-shaped transcript that
+        // does not exist for Kiro sessions.
+        return {
+          used: 0,
+          total: 0,
+          inputTokens: 0,
+          outputTokens: 0,
+          breakdown: { input: 0, output: 0 },
+          unsupported: true,
+          message: 'Token usage tracking not available for Kiro sessions yet',
+        };
+      }
+
       if (session.provider === 'opencode') {
         const databasePath = dependencies.getOpenCodeDatabasePath();
         if (!dependencies.fileExists(databasePath)) {
