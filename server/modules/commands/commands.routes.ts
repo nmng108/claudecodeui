@@ -10,6 +10,11 @@ type CommandsRouterDependencies = {
   homeDirectory(): string;
   appRoot: string;
   models: typeof import('../providers/index.js').providerModelsService;
+  /** Kiro session commands that talk to a running kiro-cli. */
+  kiro: {
+    compact(sessionId: string | null | undefined, cwd?: string): Promise<void>;
+    context(sessionId: string | null | undefined, cwd?: string): Promise<import('../providers/list/kiro/kiro-session-commands.js').KiroContextReport>;
+  };
   runtime: {
     uptime(): number;
     memoryUsage(): NodeJS.MemoryUsage;
@@ -42,6 +47,7 @@ const fs = dependencies.fileSystem;
 const os = { homedir: dependencies.homeDirectory };
 const APP_ROOT = dependencies.appRoot;
 const providerModelsService = dependencies.models;
+const kiroCommands = dependencies.kiro;
 const process = dependencies.runtime;
 const router = express.Router();
 
@@ -225,11 +231,122 @@ const builtInCommands = [
 ];
 
 /**
+ * Kiro has its own command set rather than Claude Code's: no CLAUDE.md memory
+ * file, no `.claude/commands`, but session commands backed by the Kiro agent.
+ */
+const kiroBuiltInCommands = [
+  {
+    name: "/help",
+    description: "Show the commands Kiro offers here",
+    namespace: "builtin",
+    metadata: { type: "builtin" },
+  },
+  {
+    name: "/models",
+    description: "View available Kiro models and their reasoning levels",
+    namespace: "builtin",
+    metadata: { type: "builtin" },
+  },
+  {
+    name: "/effort",
+    description: "Set the reasoning level (low, medium, high, ...)",
+    namespace: "builtin",
+    metadata: { type: "builtin" },
+  },
+  {
+    name: "/plan",
+    description: "Switch to Plan mode: Kiro plans without making changes",
+    namespace: "builtin",
+    metadata: { type: "builtin" },
+  },
+  {
+    name: "/context",
+    description: "Show how much of the context window this session uses",
+    namespace: "builtin",
+    metadata: { type: "builtin" },
+  },
+  {
+    name: "/compact",
+    description: "Summarize the conversation to free up context",
+    namespace: "builtin",
+    metadata: { type: "builtin" },
+  },
+  {
+    name: "/cost",
+    description: "Display Kiro credit usage",
+    namespace: "builtin",
+    metadata: { type: "builtin" },
+  },
+  {
+    name: "/status",
+    description: "Show system status and version information",
+    namespace: "builtin",
+    metadata: { type: "builtin" },
+  },
+  {
+    name: "/config",
+    description: "Open settings and configuration",
+    namespace: "builtin",
+    metadata: { type: "builtin" },
+  },
+];
+
+const builtInCommandsFor = (provider) =>
+  readModelProvider(provider) === "kiro" ? kiroBuiltInCommands : builtInCommands;
+
+/**
  * Built-in command handlers
  * Each handler returns { type: 'builtin', action: string, data: any }
  */
+const kiroHelp = () => ({
+  type: "builtin",
+  action: "help",
+  data: {
+    content: `# Kiro Commands
+
+## Built-in Commands
+
+${kiroBuiltInCommands
+  .map((cmd) => `### ${cmd.name}\n${cmd.description}\n`)
+  .join("\n")}
+
+## Skills and agents
+
+Kiro skills (\`~/.kiro/skills\`, \`<project>/.kiro/skills\`) appear in this menu as slash commands.
+
+### Examples
+
+\`\`\`
+/effort high
+/plan
+\`\`\`
+`,
+    format: "markdown",
+    commands: kiroBuiltInCommands.map((command) => ({
+      name: command.name,
+      description: command.description,
+      namespace: command.namespace,
+    })),
+  },
+});
+
+/** "contextFiles" -> "Context files". */
+const humanizeSectionName = (name) => {
+  const spaced = name.replace(/([A-Z])/g, " $1").toLowerCase();
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+};
+
+const requireKiro = (context, name) => {
+  if (readModelProvider(context?.provider) !== "kiro") {
+    throw new Error(`${name} is only available for Kiro sessions.`);
+  }
+};
+
 const builtInHandlers = {
   "/help": async (args, context) => {
+    if (readModelProvider(context?.provider) === "kiro") {
+      return kiroHelp();
+    }
     const helpText = `# Claude Code Commands
 
 ## Built-in Commands
@@ -343,6 +460,9 @@ Custom commands can be created in:
         tokenUsage: {
           used,
           total,
+          ...(tokenUsage.unit === "credit"
+            ? { unit: "credit", contextPercentage: Number(tokenUsage.contextPercentage) || 0 }
+            : {}),
         },
         ...(hasTokenBreakdown
           ? {
@@ -446,6 +566,56 @@ Custom commands can be created in:
     };
   },
 
+  "/effort": async (args, context) => {
+    requireKiro(context, "/effort");
+    const level = (args[0] || "").trim().toLowerCase();
+    return {
+      type: "builtin",
+      action: "effort",
+      // An empty level means "show the current one"; the client validates a level
+      // against the selected model's levels.
+      data: { level },
+    };
+  },
+
+  "/plan": async (args, context) => {
+    requireKiro(context, "/plan");
+    return { type: "builtin", action: "plan", data: {} };
+  },
+
+  "/compact": async (args, context) => {
+    requireKiro(context, "/compact");
+    await kiroCommands.compact(context?.sessionId, context?.projectPath);
+    return {
+      type: "builtin",
+      action: "notice",
+      data: { message: "Kiro summarized the conversation to free up context." },
+    };
+  },
+
+  "/context": async (args, context) => {
+    requireKiro(context, "/context");
+    const report = await kiroCommands.context(context?.sessionId, context?.projectPath);
+    const lines = [
+      "# Kiro context",
+      "",
+      report.usagePercentage === null
+        ? "Context usage is not available yet."
+        : `**${report.usagePercentage.toFixed(1)}%** of the context window is in use.`,
+      "",
+      ...report.sections.map(
+        (section) =>
+          `- **${humanizeSectionName(section.name)}**: ${section.tokens.toLocaleString()} tokens (${section.percent.toFixed(1)}%), ${section.items} item${section.items === 1 ? "" : "s"}`,
+      ),
+    ];
+    return {
+      type: "builtin",
+      // A chat notice, not the help modal: that modal lists commands and ignores free text.
+      action: "notice",
+      data: { message: lines.join("\n") },
+    };
+  },
+
   "/config": async (args, context) => {
     return {
       type: "builtin",
@@ -463,11 +633,13 @@ Custom commands can be created in:
  */
 router.post("/list", async (req, res) => {
   try {
-    const { projectPath } = req.body;
-    const allCommands = [...builtInCommands];
+    const { projectPath, provider } = req.body;
+    const isKiro = readModelProvider(provider) === "kiro";
+    const providerBuiltIns = builtInCommandsFor(provider);
+    const allCommands = [...providerBuiltIns];
 
     // Scan project-level commands (.claude/commands/)
-    if (projectPath) {
+    if (projectPath && !isKiro) {
       const projectCommandsDir = path.join(projectPath, ".claude", "commands");
       const projectCommands = await scanCommandsDirectory(
         projectCommandsDir,
@@ -480,11 +652,10 @@ router.post("/list", async (req, res) => {
     // Scan user-level commands (~/.claude/commands/)
     const homeDir = os.homedir();
     const userCommandsDir = path.join(homeDir, ".claude", "commands");
-    const userCommands = await scanCommandsDirectory(
-      userCommandsDir,
-      userCommandsDir,
-      "user",
-    );
+    // Claude Code's custom commands are not Kiro's; Kiro has skills instead.
+    const userCommands = isKiro
+      ? []
+      : await scanCommandsDirectory(userCommandsDir, userCommandsDir, "user");
     allCommands.push(...userCommands);
 
     // Separate built-in and custom commands
@@ -496,7 +667,7 @@ router.post("/list", async (req, res) => {
     customCommands.sort((a, b) => a.name.localeCompare(b.name));
 
     res.json({
-      builtIn: builtInCommands,
+      builtIn: providerBuiltIns,
       custom: customCommands,
       count: allCommands.length,
     });

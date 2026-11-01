@@ -83,10 +83,12 @@ test('kiro is included in provider selection, with its own default model and per
   });
 
   assert.equal(result.current.providerModels.kiro, 'auto');
-  // Kiro's runtime (T4) is not landed yet, so only 'default' is a valid mode;
-  // requesting anything else must fall back to it rather than error.
+  // Kiro offers Default (always ask), Accept Edits, Bypass and Plan; a mode it
+  // does not offer (Claude's auto mode) falls back to the default rather than erroring.
   assert.equal(result.current.resolvePermissionModeForProvider('kiro', 'default'), 'default');
-  assert.equal(result.current.resolvePermissionModeForProvider('kiro', 'plan'), 'default');
+  assert.equal(result.current.resolvePermissionModeForProvider('kiro', 'plan'), 'plan');
+  assert.equal(result.current.resolvePermissionModeForProvider('kiro', 'acceptEdits'), 'acceptEdits');
+  assert.equal(result.current.resolvePermissionModeForProvider('kiro', 'auto'), 'default');
 });
 
 test('a provider with no stored model falls back to its own default, not another provider’s', async () => {

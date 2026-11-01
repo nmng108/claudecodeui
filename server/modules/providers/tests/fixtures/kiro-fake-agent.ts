@@ -255,7 +255,7 @@ const connection = new AgentSideConnection((_client) => ({
       return { stopReason: 'cancelled' };
     }
 
-    if (scenario === 'permission') {
+    if (scenario === 'permission' || scenario === 'permission-read') {
       const outcome = await connection.requestPermission({
         sessionId,
         toolCall: { toolCallId: 'tool-1', title: 'Run a command', kind: 'execute', rawInput: { command: 'echo hi' } },
@@ -263,6 +263,8 @@ const connection = new AgentSideConnection((_client) => ({
           { optionId: 'allow_once', name: 'Allow once', kind: 'allow_once' },
           { optionId: 'reject_once', name: 'Reject', kind: 'reject_once' },
         ],
+        // v3 labels each request with what it touches; the app decides auto-approval from it.
+        _meta: { kiro: { consent: { capability: scenario === 'permission-read' ? 'read' : 'shell' } } },
       } as never);
 
       const selected = (outcome as { outcome: { outcome: string; optionId?: string } }).outcome;
@@ -376,7 +378,29 @@ const connection = new AgentSideConnection((_client) => ({
     return Promise.resolve();
   },
 
-  async extMethod() {
+  async extMethod(method: string, params: Record<string, unknown>) {
+    if (method === '_kiro/session/compact') {
+      return { success: true };
+    }
+    if (method === '_kiro/session/context') {
+      // The real server answers with null and reports the numbers as an update.
+      await connection.sessionUpdate({
+        sessionId: params.sessionId as string,
+        update: {
+          sessionUpdate: 'session_info_update',
+          _meta: {
+            kiro: {
+              contextUsage: { usagePercentage: 12.5 },
+              breakdown: {
+                contextFiles: { tokens: 1200, percent: 3, items: [{ name: 'a' }, { name: 'b' }] },
+                tools: { tokens: 5300, percent: 0.5, items: [] },
+              },
+            },
+          },
+        },
+      } as never);
+      return null as never;
+    }
     return {};
   },
 

@@ -36,8 +36,15 @@ export async function ensureProject(request: APIRequestContext, token: string): 
 export async function openApp(page: Page, token: string): Promise<{ errors: string[] }> {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
+  page.on('response', (response) => {
+    // Only our own servers: the page also calls api.github.com (star count, update check), which rate-limits.
+    if (response.status() >= 400 && /^https?:\/\/(127\.0\.0\.1|localhost)[:/]/.test(response.url())) {
+      errors.push(`http ${response.status()} ${response.request().method()} ${response.url()}`);
+    }
+  });
   page.on('console', (message) => {
-    if (message.type() === 'error') {
+    // A failed request is reported once, with its URL, by the response listener above.
+    if (message.type() === 'error' && !message.text().startsWith('Failed to load resource')) {
       errors.push(`console: ${message.text()}`);
     }
   });

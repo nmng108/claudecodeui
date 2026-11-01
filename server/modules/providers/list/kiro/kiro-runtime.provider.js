@@ -9,7 +9,7 @@ import { resolveKiroApiKey } from '@/modules/providers/list/kiro/kiro-api-key.st
 import { KiroAcpClient } from '@/modules/providers/list/kiro/kiro-acp.client.js';
 import { buildKiroToolResult } from '@/modules/providers/list/kiro/kiro-tool-output.js';
 import { parseKiroModelCatalog, seedKiroModelCatalog } from '@/modules/providers/list/kiro/kiro-models.provider.js';
-import { findKiroSessionDir, getKiroMessagesPath } from '@/modules/providers/list/kiro/kiro-paths.js';
+import { findKiroSessionDir, getKiroMessagesPath, readKiroSessionJson } from '@/modules/providers/list/kiro/kiro-paths.js';
 import { readKiroTranscriptUsage, sumKiroCredits } from '@/modules/providers/list/kiro/kiro-usage.js';
 
 /** Live ACP clients keyed by the app session id (falling back to the ACP session id for legacy/direct callers). */
@@ -60,14 +60,31 @@ export function isKiroSessionRunning(providerSessionId) {
  * other runtimes; `default` and unknown levels leave Kiro's own setting alone.
  * Exported for tests.
  */
+export const KIRO_DEFAULT_EFFORT = 'medium';
+
 export function resolveKiroEffort(modelId, effort, catalog) {
   const selectedModel = catalog?.OPTIONS?.find((option) => option.value === modelId);
   const allowedEfforts = selectedModel?.effort?.values?.map((value) => value.value) || [];
-  return typeof effort === 'string' && effort !== 'default' && allowedEfforts.includes(effort)
-    ? effort
-    : undefined;
+  // No explicit choice means Kiro's default of "medium" (what kiro-ui starts
+  // with), not the model's own default, which can be higher and spend more.
+  const requested = typeof effort === 'string' && effort && effort !== 'default' ? effort : KIRO_DEFAULT_EFFORT;
+  return allowedEfforts.includes(requested) ? requested : undefined;
 }
 
+/**
+ * Whether a permission request is answered without asking the user, for the
+ * mode chosen in the composer:
+ * - bypassPermissions: everything ("Allow all").
+ * - acceptEdits: reads and edits, as Kiro labels them (`consent.capability`
+ *   `read` / `write`); shell and web access still ask.
+ * - default and plan: always ask.
+ */
+export function shouldAutoApproveKiroPermission(permissionMode, capability) {
+  if (permissionMode === 'bypassPermissions') {
+    return true;
+  }
+  return permissionMode === 'acceptEdits' && (capability === 'read' || capability === 'write');
+}
 /**
  * Runs one Kiro ACP turn: connects (or resumes), sends the prompt, streams
  * normalized events to `ws`, and resolves once the turn's stop reason comes
@@ -93,7 +110,6 @@ async function runKiro(command, options = {}, ws, context) {
   // Claude/Codex/OpenCode do for unattended runs: there is no UI tab waiting
   // to answer a `session/request_permission` call, so it is auto-approved
   // with the first allow option ACP offered instead of hanging the turn.
-  const autoApprove = permissionMode === 'bypassPermissions';
 
   let client = null;
   let capturedSessionId = providerSessionId || null;
@@ -255,7 +271,7 @@ async function runKiro(command, options = {}, ws, context) {
         onPermissionRequest: async (event) => {
           const activeSessionId = capturedSessionId || sessionId || null;
 
-          if (autoApprove) {
+          if (shouldAutoApproveKiroPermission(permissionMode, event.capability)) {
             const allowOption = event.options.find((option) => option.kind === 'allow_once' || option.kind === 'allow_always');
             return allowOption ? { optionId: allowOption.optionId } : { cancelled: true };
           }
@@ -326,9 +342,11 @@ async function runKiro(command, options = {}, ws, context) {
     registerActive();
 
     let sessionResult;
+    let recordedMode;
     if (providerSessionId) {
       const priorDir = await findKiroSessionDir(providerSessionId);
       if (priorDir) {
+        recordedMode = (await readKiroSessionJson(priorDir))?.agentMode;
         const prior = await readKiroTranscriptUsage(getKiroMessagesPath(priorDir));
         sessionCredits = prior.credits;
         contextPercentage = prior.contextPercentage;
@@ -394,6 +412,26 @@ async function runKiro(command, options = {}, ws, context) {
           sessionId: capturedSessionId || sessionId || null,
           provider: 'kiro',
         }));
+      }
+    }
+
+    // Plan mode is Kiro's own "plan" agent mode (v3); leaving it restores the default mode.
+    if (client.getEngine() === 'v3') {
+      const modeOption = sessionResult.raw?.configOptions?.find((option) => option?.id === 'mode');
+      const currentMode = modeOption?.currentValue ?? recordedMode;
+      const wantedMode = permissionMode === 'plan' ? 'plan' : currentMode === 'plan' ? 'vibe' : null;
+      if (wantedMode && wantedMode !== currentMode) {
+        try {
+          await client.setConfigOption('mode', wantedMode);
+        } catch {
+          ws.send(createNormalizedMessage({
+            kind: 'status',
+            text: 'mode_switch_failed',
+            reason: `Kiro could not switch to the "${wantedMode}" mode.`,
+            sessionId: capturedSessionId || sessionId || null,
+            provider: 'kiro',
+          }));
+        }
       }
     }
 

@@ -1,4 +1,4 @@
-﻿# Browser end-to-end tests
+# Browser end-to-end tests
 
 `npm run test:e2e` drives the real UI in a browser against the real API server.
 Only `kiro-cli` is replaced by a fake that speaks the v3 ACP protocol
@@ -29,8 +29,10 @@ account or credits are needed and runs are repeatable.
 New session streams text and shows the tool card and the credit counter with no
 uncaught error (this is the test that would have caught the `trim` crash);
 the session appears in the sidebar and reopens with history; a permission request
-is shown and allowing it finishes the turn; model catalog with per-model
-reasoning levels; capabilities; fork plus credit token usage; MCP add and list.
+is shown and allowing it finishes the turn; the default medium effort and /effort;
+the Kiro slash-command set; /plan; Accept Edits and Bypass permission modes;
+/context and /compact; the Shell tab launching kiro-cli --v3; model catalog with
+per-model reasoning levels; capabilities; fork plus credit token usage; MCP add and list.
 
 ## Not covered
 

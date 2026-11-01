@@ -35,6 +35,7 @@ async function executeCustomCommand(
     appRoot: '/app',
     // Custom commands never consult the model catalog.
     models: {} as never,
+    kiro: { compact: async () => undefined, context: async () => ({ usagePercentage: null, sections: [] }) },
     runtime: {
       uptime: () => 0,
       memoryUsage: () => ({ rss: 0, heapTotal: 0, heapUsed: 0, external: 0, arrayBuffers: 0 }),

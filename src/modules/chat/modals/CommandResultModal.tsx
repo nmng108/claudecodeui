@@ -427,7 +427,17 @@ function CostContent({ data }: { data: CostCommandData }) {
   const hasBreakdown =
     typeof data.tokenBreakdown?.input === 'number' ||
     typeof data.tokenBreakdown?.output === 'number';
-  const usageRows = [
+  const isCredits = data.tokenUsage?.unit === 'credit';
+  const usageRows = isCredits
+    ? [
+        { label: 'Credits used', value: used.toFixed(2), icon: Coins },
+        {
+          label: 'Context window used',
+          value: `${Number(data.tokenUsage?.contextPercentage ?? 0).toFixed(1)}%`,
+          icon: Gauge,
+        },
+      ]
+    : [
     { label: 'Total tokens used', value: formatNumber(used), icon: Activity },
     ...(hasBreakdown
       ? [

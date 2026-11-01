@@ -5,6 +5,7 @@ import path from 'node:path';
 import pty, { type IPty } from 'node-pty';
 import { WebSocket, type RawData } from 'ws';
 
+import { resolveKiroApiKey } from '@/modules/providers/index.js';
 import { parseIncomingJsonObject, stripAnsiSequences } from '@/shared/utils.js';
 
 type ShellIncomingMessage = {
@@ -248,6 +249,20 @@ function buildShellCommand(
       return otherProgram(`opencode --session "${resumeSessionId}"`);
     }
     return otherProgram(initialCommand || 'opencode');
+  }
+
+  if (provider === 'kiro') {
+    // Kiro CLI v3 is the engine the chat integration uses, so the terminal opens
+    // the same one (and the same session store). CLOUDCLI_KIRO_ENGINE=v2 opts out.
+    const engineFlag = process.env.CLOUDCLI_KIRO_ENGINE?.trim().toLowerCase() === 'v2' ? '--v2' : '--v3';
+    const base = `kiro-cli ${engineFlag}`;
+    // The id is interpolated into a shell command line, so only Kiro's own id shape is accepted.
+    if (resumeSessionId && /^(sess|cli)_[A-Za-z0-9_-]+$/.test(resumeSessionId)) {
+      return otherProgram(os.platform() === 'win32'
+        ? `${base} --resume-id "${resumeSessionId}"; if ($LASTEXITCODE -ne 0) { ${base} }`
+        : `${base} --resume-id "${resumeSessionId}" || ${base}`);
+    }
+    return otherProgram(base);
   }
 
   // Launching with the flag is what unlocks "bypass permissions" in the CLI's
@@ -646,6 +661,11 @@ export function handleShellConnection(
         const termCols = readNumber(data.cols, 80);
         const termRows = readNumber(data.rows, 24);
         const prioritizedPath = prioritizeUserNpmGlobalBin(process.env);
+        // The interactive Kiro CLI signs in with the API key stored in CloudCLI when
+        // there is one, the same key the chat integration passes to `kiro-cli acp`.
+        const kiroApiKey = readString(data.provider, 'claude') === 'kiro' && !isPlainShell
+          ? await resolveKiroApiKey()
+          : undefined;
 
         shellProcess = (dependencies.spawnPty ?? pty.spawn)(shell, shellArgs, {
           name: 'xterm-256color',
@@ -655,6 +675,7 @@ export function handleShellConnection(
           env: {
             ...process.env,
             [prioritizedPath.key]: prioritizedPath.value,
+            ...(kiroApiKey ? { KIRO_API_KEY: kiroApiKey } : {}),
             TERM: 'xterm-256color',
             COLORTERM: 'truecolor',
             FORCE_COLOR: '3',

@@ -746,3 +746,36 @@ test('other shells and initial commands only get the COLORFGBG hint', () => {
     );
   });
 });
+
+test('the Kiro tab starts kiro-cli (v3), resumes a known session and keeps the API key in its environment', async () => {
+  const saved = process.env.KIRO_API_KEY;
+  const savedEngine = process.env.CLOUDCLI_KIRO_ENGINE;
+  process.env.KIRO_API_KEY = 'shell-test-key';
+  delete process.env.CLOUDCLI_KIRO_ENGINE;
+  try {
+    const fresh = spawnRecorder();
+    launch(fresh.dependencies, { provider: 'kiro' });
+    const resumed = spawnRecorder('sess_0123-abc');
+    launch(resumed.dependencies, { provider: 'kiro', hasSession: true });
+    const unsafe = spawnRecorder('sess_1" ; calc');
+    launch(unsafe.dependencies, { provider: 'kiro', hasSession: true });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    assert.deepEqual(fresh.calls.map((call) => call.command), ['kiro-cli --v3']);
+    assert.match(resumed.calls[0].command, /^kiro-cli --v3 --resume-id "sess_0123-abc"/);
+    assert.equal(unsafe.calls[0].command, 'kiro-cli --v3', 'an id that is not Kiro-shaped is never put on the command line');
+    assert.equal(fresh.calls[0].env.KIRO_API_KEY, 'shell-test-key');
+
+    process.env.CLOUDCLI_KIRO_ENGINE = 'v2';
+    const legacy = spawnRecorder();
+    launch(legacy.dependencies, { provider: 'kiro' });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.deepEqual(legacy.calls.map((call) => call.command), ['kiro-cli --v2']);
+
+  } finally {
+    for (const [name, value] of [['KIRO_API_KEY', saved], ['CLOUDCLI_KIRO_ENGINE', savedEngine]] as const) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+});

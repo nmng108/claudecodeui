@@ -40,6 +40,12 @@ type UseChatComposerStateArgs = {
   permissionMode: PermissionMode | string;
   cyclePermissionMode: () => void;
   resolvePermissionModeForProvider: (provider: LLMProvider, requestedMode: PermissionMode | string) => PermissionMode;
+  /** Sets the permission mode (used by the Kiro /plan command). */
+  onSelectPermissionMode?: (mode: PermissionMode) => void;
+  /** Sets the reasoning effort (used by the Kiro /effort command). */
+  onSelectEffort?: (effort: string) => unknown;
+  /** Reasoning levels the selected model accepts, for validating /effort. */
+  availableEffortValues?: string[];
   /**
    * Model every send and command carries: the open session's model when there
    * is one, otherwise the user's per-provider selection.
@@ -203,6 +209,9 @@ export function useChatComposerState({
   permissionMode,
   cyclePermissionMode,
   resolvePermissionModeForProvider,
+  onSelectPermissionMode,
+  onSelectEffort,
+  availableEffortValues,
   currentProviderModel,
   currentProviderEffort,
   isLoading,
@@ -399,11 +408,44 @@ export function useChatComposerState({
           onShowSettings?.();
           break;
 
+        case 'effort': {
+          const level = typeof data?.level === 'string' ? data.level : '';
+          const allowed = availableEffortValues ?? [];
+          let content: string;
+          if (!level) {
+            content = `Reasoning effort is ${currentProviderEffort === 'default' ? 'the default' : currentProviderEffort}. Available: ${allowed.join(', ') || 'none for this model'}.`;
+          } else if (!allowed.includes(level)) {
+            content = `"${level}" is not available for this model. Available: ${allowed.join(', ') || 'none'}.`;
+          } else {
+            void onSelectEffort?.(level);
+            content = `Reasoning effort set to ${level}.`;
+          }
+          addMessage({ type: 'assistant', content, timestamp: Date.now() });
+          break;
+        }
+
+        case 'plan':
+          onSelectPermissionMode?.('plan');
+          addMessage({
+            type: 'assistant',
+            content: 'Plan mode is on: Kiro will plan without making changes. Switch the permission mode to leave it.',
+            timestamp: Date.now(),
+          });
+          break;
+
+        case 'notice':
+          addMessage({
+            type: 'assistant',
+            content: typeof data?.message === 'string' ? data.message : 'Done.',
+            timestamp: Date.now(),
+          });
+          break;
+
         default:
           console.warn('Unknown built-in command action:', action);
       }
     },
-    [onFileOpen, onShowSettings, addMessage],
+    [onFileOpen, onShowSettings, addMessage, onSelectEffort, onSelectPermissionMode, availableEffortValues, currentProviderEffort],
   );
 
   const closeCommandModal = useCallback(() => {

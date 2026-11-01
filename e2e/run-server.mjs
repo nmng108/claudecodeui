@@ -19,15 +19,23 @@ function prepareSandbox() {
     mkdirSync(dir, { recursive: true });
   }
 
-  const fixture = path.join(repoRoot, 'server', 'modules', 'providers', 'tests', 'fixtures', 'kiro-fake-agent.ts');
-  const node = `"${process.execPath}" --experimental-strip-types --disable-warning=ExperimentalWarning "${fixture}"`;
+  // `kiro-cli acp ...` is the chat integration (a fake ACP agent); any other
+  // launch is the interactive CLI the Shell tab opens (a recording stand-in).
+  const fixtures = path.join(repoRoot, 'server', 'modules', 'providers', 'tests', 'fixtures');
+  const node = (file) =>
+    `"${process.execPath}" --experimental-strip-types --disable-warning=ExperimentalWarning "${path.join(fixtures, file)}"`;
+  const agent = node('kiro-fake-agent.ts');
+  const interactive = node('kiro-fake-interactive.ts');
   let cli;
   if (process.platform === 'win32') {
     cli = path.join(bin, 'kiro-cli.cmd');
-    writeFileSync(cli, `@echo off\r\n${node} %*\r\n`);
+    writeFileSync(
+      cli,
+      `@echo off\r\nif /I "%~1"=="acp" (\r\n${agent} %*\r\n) else (\r\n${interactive} %*\r\n)\r\n`,
+    );
   } else {
     cli = path.join(bin, 'kiro-cli');
-    writeFileSync(cli, `#!/bin/sh\nexec ${node} "$@"\n`);
+    writeFileSync(cli, `#!/bin/sh\nif [ "$1" = "acp" ]; then exec ${agent} "$@"; else exec ${interactive} "$@"; fi\n`);
     chmodSync(cli, 0o755);
   }
   // An existing (empty) database file stops the server from copying the legacy
@@ -37,12 +45,15 @@ function prepareSandbox() {
 }
 
 const { home, cli } = prepareSandbox();
+const pathKey = Object.keys(process.env).find((key) => key.toLowerCase() === 'path') ?? 'PATH';
 const child = spawn('npx', ['tsx', '--tsconfig', 'server/tsconfig.json', 'server/index.ts'], {
   cwd: repoRoot,
   shell: true,
   stdio: 'inherit',
   env: {
     ...process.env,
+    // The Shell tab launches a bare `kiro-cli`, so the stand-in must come first on PATH.
+    [pathKey]: `${path.join(SANDBOX, 'bin')}${path.delimiter}${process.env[pathKey] ?? ''}`,
     HOST: '127.0.0.1',
     SERVER_PORT,
     PORT: SERVER_PORT,

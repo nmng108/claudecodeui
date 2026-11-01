@@ -725,6 +725,10 @@ export type CostCommandData = {
   tokenUsage?: {
     used?: number;
     total?: number;
+    /** Kiro reports credits, not tokens: used is then a credit count. */
+    unit?: 'credit';
+    /** Share of the context window in use (0-100), reported by Kiro. */
+    contextPercentage?: number;
   };
   tokenBreakdown?: {
     input?: number;

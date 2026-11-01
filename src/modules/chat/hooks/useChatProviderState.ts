@@ -12,6 +12,16 @@ import type { PendingPermissionRequest, PermissionMode,
 import { DEFAULT_EFFORT_VALUE } from '@/shared/constants';
 import { readSelectedProvider, writeSelectedProvider } from '@/shared/selectedProvider';
 
+/**
+ * The reasoning effort a provider starts with before the user picks one. Kiro
+ * starts at "medium" (as kiro-ui does) instead of the model's own default,
+ * which can be higher and costs more credits. Other providers keep the
+ * "default" entry, meaning the provider decides.
+ */
+const BASELINE_PROVIDER_EFFORT: Partial<Record<LLMProvider, string>> = { kiro: 'medium' };
+const getBaselineEffort = (targetProvider: LLMProvider): string =>
+  BASELINE_PROVIDER_EFFORT[targetProvider] ?? DEFAULT_EFFORT_VALUE;
+
 const FALLBACK_PROVIDER_EFFORT_VALUES: Partial<Record<LLMProvider, readonly string[]>> = {
   // Superset used only before the model catalog loads; `ultracode` belongs to the
   // xhigh-capable models alone, but listing it here keeps a stored ultracode
@@ -24,7 +34,7 @@ const FALLBACK_PROVIDER_EFFORT_VALUES: Partial<Record<LLMProvider, readonly stri
   opencode: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
   // Superset used only before the model catalog loads; the backend's own
   // levels for Kiro narrow it per model once the catalog is available.
-  kiro: ['low', 'medium', 'high', 'xhigh', 'max'],
+  kiro: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
 };
 
 const toProviderEffortOptions = (
@@ -60,7 +70,7 @@ const FALLBACK_PERMISSION_MODES: Record<LLMProvider, PermissionMode[]> = {
   opencode: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
   // Kiro's runtime (T4) has not landed yet; `default` is the only mode ACP
   // guarantees until the backend capability matrix reports more.
-  kiro: ['default'],
+  kiro: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
 };
 
 type ProviderCapabilities = {
@@ -153,7 +163,7 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   });
   const [providerEfforts, setProviderEfforts] = useState<Partial<Record<LLMProvider, string>>>(() => {
     return PROVIDERS.reduce<Partial<Record<LLMProvider, string>>>((acc, targetProvider) => {
-      acc[targetProvider] = localStorage.getItem(`${targetProvider}-effort`) || DEFAULT_EFFORT_VALUE;
+      acc[targetProvider] = localStorage.getItem(`${targetProvider}-effort`) || getBaselineEffort(targetProvider);
       return acc;
     }, {});
   });
@@ -341,10 +351,16 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
   ): string => {
     const allowedValues = getAllowedEffortValues(targetProvider, model);
     if (allowedValues.length === 0) {
-      return DEFAULT_EFFORT_VALUE;
+      // This model offers no levels (yet): keep the provider's starting level so
+      // it is still there when the user switches to a model that does.
+      return currentEffort === DEFAULT_EFFORT_VALUE ? DEFAULT_EFFORT_VALUE : getBaselineEffort(targetProvider);
     }
 
-    if (currentEffort === DEFAULT_EFFORT_VALUE || !currentEffort) {
+    if (!currentEffort) {
+      return getBaselineEffort(targetProvider);
+    }
+
+    if (currentEffort === DEFAULT_EFFORT_VALUE) {
       return DEFAULT_EFFORT_VALUE;
     }
 
@@ -388,7 +404,7 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     let hasUpdates = false;
 
     for (const targetProvider of PROVIDERS) {
-      const currentEffort = providerEfforts[targetProvider] ?? DEFAULT_EFFORT_VALUE;
+      const currentEffort = providerEfforts[targetProvider] ?? getBaselineEffort(targetProvider);
       const nextEffort = reconcileStoredEffort(targetProvider, providerModels[targetProvider], currentEffort);
       if (nextEffort === currentEffort) {
         continue;
@@ -697,7 +713,7 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
       currentProviderModel,
       activeSessionSelection?.effort
         ?? providerEfforts[provider]
-        ?? DEFAULT_EFFORT_VALUE,
+        ?? getBaselineEffort(provider),
     );
   }, [activeSessionSelection?.effort, currentProviderModel, provider, providerEfforts, reconcileStoredEffort]);
   const currentProviderModelOptions = useMemo(

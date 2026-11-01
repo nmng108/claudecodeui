@@ -18,6 +18,7 @@ Legend: `[x]` done and committed, `[~]` code written but uncommitted/unverified,
 - [x] **T6a** Fix: tool results without content crashed the chat UI (commit 08eb451a).
 - [x] **T6b** Upgrade the ACP integration to the Kiro CLI v3 engine (see the T6b section below).
 - [x] **T6c** Browser end-to-end tests (Playwright), see docs/kiro/e2e.md.
+- [x] **T6d** Parity with kiro-ui: effort default, permission modes, Kiro commands, Kiro Shell tab (see the T6d section).
 - [ ] **T9** Verify (typecheck, lint, test, test:client, build), publish, Docker check, push.
 
 Each task ends with a conventional-commit commit.
@@ -226,3 +227,30 @@ Replaces the T3 stubs `kiro-models.provider.ts`, `kiro-sessions.provider.ts`, `k
 - The `/cost` slash command modal still labels numbers as tokens (it is built from a different server path).
 - Sidebar listing, history and delete stay file-based (Kiro advises `session/list`, but that needs a running `kiro-cli`; the file reader works offline). Revisit if Kiro changes the on-disk layout.
 - Persistent permission choices (`always-accept`), `_kiro/mcp/status`, `_kiro/session/compact` and context breakdown are not surfaced in the UI.
+
+### T6d: kiro-ui parity (2026-11-02)
+
+**Reasoning effort (default medium).** The composer's model menu already has a "Reasoning" list, filled from the model catalog. What was missing was the starting value: Kiro now starts at `medium` (as kiro-ui does) instead of the model's own default, which is often `high` and costs more credits. The UI baseline is `medium` for Kiro (`getBaselineEffort`), and the runtime sends `medium` when no level was chosen and the model offers it (`resolveKiroEffort`). A model without `medium` keeps its own default. "Default" stays in the menu and now also means medium for Kiro.
+
+**Permission modes: evaluated, the existing four fit, so no new list.** kiro-ui offers Always ask, Allow read and Allow all. The composer's existing modes map onto Kiro like this, using the `_meta.kiro.consent.capability` label (`read`, `write`, `shell`, `web`) that v3 puts on every permission request:
+
+| Composer mode | Kiro behaviour |
+|---|---|
+| Default Mode | Always ask (kiro-ui "Always ask"). Starting mode. |
+| Accept Edits | Answers `read` and `write` requests itself; `shell`, `web` and unlabelled requests still ask. This covers kiro-ui's "Allow read" and adds edits. |
+| Bypass Permissions | Allows everything (kiro-ui "Allow all"). |
+| Plan Mode | Switches Kiro's own `plan` agent mode (`session/set_config_option` `mode`, verified live) and back to `vibe` afterwards. Nothing is changed. |
+
+Kiro's own "Allow read" alone (reads but not edits) has no separate entry; Accept Edits is the nearest, and it is the more permissive of the two, so the label shown to the user is "Accept Edits". If a read-only entry is wanted later, add a Kiro-specific mode to the capability list.
+
+**Commands per provider.** `POST /api/commands/list` now takes `provider`. Kiro gets its own built-ins and none of Claude Code's (`/memory`, `.claude/commands`): `/help`, `/models`, `/effort [level]`, `/plan`, `/context`, `/compact`, `/cost` (credits), `/status`, `/config`. Other providers keep the existing list. Kiro skills still appear as slash commands (from the skills provider).
+- `/effort` and `/plan` are client actions (they set the composer's effort and permission mode).
+- `/compact` and `/context` start a short-lived `kiro-cli acp`, load the session and call `_kiro/session/compact` / `_kiro/session/context` (both advertised by v3, checked live). `/context` is answered by a `session_info_update` with a breakdown, which is shown as a chat notice. They refuse while a CloudCLI turn is running on the session.
+- `/cost` shows credits and the context share for Kiro.
+- Commands from the v3 migration table that are not offered: `/clear` and `/chat` (the app already has New session and the sidebar), `/usage` (`_kiro/account/getUsage` is not advertised on this build; credits are in the counter and `/cost`), `/mcp` and `/tools` (Settings), `/rewind` (use Fork), `/knowledge`, `/code`, `/hooks`, `/goal`, `/reply`, `/voice`, `/paste`, `/feedback`.
+
+**Shell tab.** For a Kiro session the terminal starts `kiro-cli --v3` (`--v2` when `CLOUDCLI_KIRO_ENGINE=v2`), resuming with `--resume-id <id>` when the session is known and falling back to a fresh start if that fails. The id is only used when it has Kiro's shape, because it goes on a shell command line. The stored API key is passed to the terminal as `KIRO_API_KEY`.
+
+**Tests.** Server: effort default, permission-mode mapping, command list and handlers, shell launch. Client: updated expectations. End to end: effort starts at medium and `/effort` changes it, the slash menu shows the Kiro set, `/plan`, Accept Edits asks only for shell, Bypass allows all, `/context` and `/compact` on a stored session, and the Shell tab launching `kiro-cli --v3` with the key.
+
+**Found while testing.** Pressing Enter in the slash menu before it has re-filtered runs the first listed command, and opening a session of another provider shows the previous provider's command list for a moment. Both are existing behaviour; the e2e tests wait for the menu to settle.

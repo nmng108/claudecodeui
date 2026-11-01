@@ -49,6 +49,8 @@ export type KiroPermissionRequestEvent = {
   kind: string | undefined;
   options: KiroPermissionOption[];
   rawInput: unknown;
+  /** v3 _meta.kiro.consent.capability: ead, write, shell, web, ... when the agent says. */
+  capability?: string;
 };
 
 export type KiroSessionUpdateEvent =
@@ -206,6 +208,13 @@ function toSessionUpdateEvent(update: Record<string, unknown>): KiroSessionUpdat
     default:
       return { type: 'unknown', sessionUpdate: kind, raw: update };
   }
+}
+
+/** The capability Kiro attaches to a permission request (`_meta.kiro.consent.capability`), if any. */
+function readConsentCapability(params: Record<string, unknown>): string | undefined {
+  const meta = params._meta as { kiro?: { consent?: { capability?: unknown } } } | undefined;
+  const capability = meta?.kiro?.consent?.capability;
+  return typeof capability === 'string' && capability ? capability : undefined;
 }
 
 /** Ext notification methods this task's client actively interprets; everything else is just forwarded/logged. */
@@ -631,6 +640,7 @@ export class KiroAcpClient {
       kind: toolCall.kind as string | undefined,
       options,
       rawInput: toolCall.rawInput,
+      capability: readConsentCapability(params),
     })).then(
       (result) => result ?? decisionPromise,
       () => ({ cancelled: true }) as const,

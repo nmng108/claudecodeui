@@ -262,6 +262,9 @@ function ChatInterface({
     setIsUserScrolledUp,
     setPendingPermissionRequests,
     resolvePermissionModeForProvider,
+    onSelectPermissionMode: selectPermissionMode,
+    onSelectEffort: (effort: string) => selectProviderEffort(provider, effort, currentSessionId || selectedSession?.id || null),
+    availableEffortValues: currentProviderEffortOptions.map((option) => option.value),
   });
 
   // On WebSocket reconnect, request a bounded persisted-tail sync (deferred
