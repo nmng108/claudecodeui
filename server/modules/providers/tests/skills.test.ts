@@ -470,6 +470,26 @@ test('providerSkillsService lists opencode project and user compatibility skills
  * This test covers Cursor skill directory rules, including shared
  * `.agents/skills` project support.
  */
+test('providerSkillsService lists kiro user and project skills', { concurrency: false }, async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-skills-kiro-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  await fs.mkdir(workspacePath, { recursive: true });
+
+  const restoreHomeDir = patchHomeDir(tempRoot);
+  try {
+    await writeSkill(path.join(tempRoot, '.kiro', 'skills'), 'kiro-user-dir', 'kiro-user', 'Kiro user skill');
+    await writeSkill(path.join(workspacePath, '.kiro', 'skills'), 'kiro-project-dir', 'kiro-project', 'Kiro project skill');
+
+    const kiroSkills = await providerSkillsService.listProviderSkills('kiro', { workspacePath });
+    const byName = new Map(kiroSkills.map((skill) => [skill.name, skill]));
+    assert.equal(byName.get('kiro-user')?.scope, 'user');
+    assert.equal(byName.get('kiro-user')?.command, '/kiro-user');
+    assert.equal(byName.get('kiro-project')?.scope, 'project');
+  } finally {
+    restoreHomeDir();
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
 test('providerSkillsService lists cursor skills from its configured directories', { concurrency: false }, async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-skills-gc-'));
   const workspacePath = path.join(tempRoot, 'workspace');

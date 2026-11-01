@@ -120,16 +120,14 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
   },
   kiro: {
     provider: 'kiro',
-    // ACP runtime lands in T4; permission modes mirror the modes the Kiro
-    // ACP permission UI is expected to drive once `kiro-acp.client.ts` is
-    // wired up. Capabilities are otherwise reported false/empty until their
-    // runtime, auth override, and effort support are implemented.
+    // The ACP runtime maps these onto Kiro's own permission options: bypassPermissions
+    // auto-approves, the others bridge each request to the UI.
     permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
     defaultPermissionMode: 'default',
     supportsImages: false,
     supportsFiles: false,
-    supportsAbort: false,
-    supportsPermissionRequests: false,
+    supportsAbort: true,
+    supportsPermissionRequests: true,
     supportsTokenUsage: false,
     // Kiro applies the level with its `/effort <level>` command. The levels a
     // model accepts depend on the model, so this is the ceiling that custom

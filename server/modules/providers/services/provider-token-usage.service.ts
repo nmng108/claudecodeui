@@ -449,10 +449,9 @@ export function createProviderTokenUsageService(
       }
 
       if (session.provider === 'kiro') {
-        // `_kiro.dev/metadata` reports context usage once the ACP runtime
-        // (T4) and token-usage task (T6) land; until then this reports
-        // "unsupported" rather than reading a Claude-shaped transcript that
-        // does not exist for Kiro sessions.
+        // Kiro records only a context-usage percentage (session_metadata /
+        // contextUsage), never token counts, so the token counter has nothing
+        // to show. supportsTokenUsage stays false for Kiro.
         return {
           used: 0,
           total: 0,
@@ -460,7 +459,7 @@ export function createProviderTokenUsageService(
           outputTokens: 0,
           breakdown: { input: 0, output: 0 },
           unsupported: true,
-          message: 'Token usage tracking not available for Kiro sessions yet',
+          message: 'Token usage tracking not available for Kiro sessions',
         };
       }
 

@@ -12,7 +12,7 @@ Legend: `[x]` done and committed, `[~]` code written but uncommitted/unverified,
   - [x] **T5a** Live Kiro model catalog from `session/new` (cache + static fallback), per-session model from `session.json`.
   - [x] **T5b** Reasoning level: Kiro effort levels in the capability matrix, runtime validate/apply, Model library shows "Reasoning level".
   - [x] **T5c** File-based session synchronizer + watcher, sidebar sessions, history reader, delete.
-- [ ] **T6** MCP, skills, token usage, fork/rewind capability, tests.
+- [x] **T6** MCP, skills, token usage, fork/rewind capability, tests.
 - [x] **T7** Frontend: picker, login modal with API key, MCP constants, settings, api-docs, tests. (commit c36378c4)
 - [x] **T8** `docker/standard/Dockerfile`, `docker-compose.yml`, docs.
 - [ ] **T9** Verify (typecheck, lint, test, test:client, build), publish, Docker check, push.
@@ -187,3 +187,10 @@ Replaces the T3 stubs `kiro-models.provider.ts`, `kiro-sessions.provider.ts`, `k
 - `kiro-cli` needs `KIRO_API_KEY` only in the child env. The runtime auto-approves permission requests under `bypassPermissions` (Agent API) and otherwise bridges them to the UI through the shared `chat.permission-response` path (deny selects the `reject_*` option).
 - Abort sends `session/cancel`; the abort handler owns the aborted `complete`. Unknown `_kiro.dev/*` notifications are ignored; `metadata`, `commands/available` and `session/list_update` are forwarded as `status` events.
 - Windows: `cross-spawn` replaces the child's `exit` with an `error` event for ENOENT, and the stream closes first; the client waits briefly and reports `KIRO_CLI_NOT_FOUND`.
+
+### T6 results (2026-11-01)
+- MCP: `kiro-mcp.provider.ts` reads and writes `mcpServers` in `~/.kiro/settings/mcp.json` (user) and `<workspace>/.kiro/settings/mcp.json` (project). Transports: stdio (`command`/`args`/`env`) and http (`url`/`headers`). Other top-level keys and per-server fields written by Kiro (`disabled`, `autoApprove`) are kept for servers CloudCLI does not touch. An unparseable file is never overwritten (422 `KIRO_MCP_CONFIG_INVALID`). Writes go through a temp file plus rename. The format comes from Kiro's public docs and search snippets; the docs page itself could not be fetched here, so it was not checked against a live `kiro-cli`.
+- Skills: the existing `kiro-skills.provider.ts` roots (`~/.kiro/skills`, `<workspace>/.kiro/skills`, prefix `/`) work, including the symlinked skill folders in the real `~/.kiro/skills`. The Skills tab is enabled for Kiro (the `'kiro'` exclusions were removed from `ProviderSkills.tsx` and `AgentCategoryContentSection.tsx`).
+- Token usage: stays `unsupported`. Kiro records only a context-usage percentage (`session_metadata` / `contextUsage` in `messages.jsonl`), not token counts, and the counter shows tokens. `supportsTokenUsage` stays false.
+- Capabilities: `supportsAbort` and `supportsPermissionRequests` are now true (the T4 runtime implements both). `supportsImages` / `supportsFiles` stay false (attachments go as text tags). Fork, rewind and message editing stay unsupported (`supportsSessionForking` and `supportsMessageEditing` false); no `_kiro.dev/*` command was found for them.
+- Tests: new Kiro cases in `mcp.test.ts` (including the global adder, now 5 successes) and `skills.test.ts`. Provider suite: 437 tests, 13 fail, all in the pre-existing `claude-auth` and `claude-runtime-hold` files. Server tsc clean, oxlint 0 errors, related client tests pass.

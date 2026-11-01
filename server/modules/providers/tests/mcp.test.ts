@@ -257,6 +257,98 @@ test('providerMcpService handles opencode MCP config and capability validation',
 });
 
 /**
+ * This test covers Kiro MCP persistence in `.kiro/settings/mcp.json`: user and project scopes,
+ * stdio and http servers, preserved foreign keys, and refusal to overwrite an unparseable file.
+ */
+test('providerMcpService handles kiro MCP config and capability validation', { concurrency: false }, async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-mcp-kiro-'));
+  const workspacePath = path.join(tempRoot, 'workspace');
+  await fs.mkdir(path.join(tempRoot, '.kiro', 'settings'), { recursive: true });
+  await fs.mkdir(workspacePath, { recursive: true });
+  await fs.writeFile(
+    path.join(tempRoot, '.kiro', 'settings', 'mcp.json'),
+    JSON.stringify({
+      powers: { mcpServers: {} },
+      mcpServers: { existing: { command: 'uvx', args: ['x'], disabled: true } },
+    }),
+    'utf8',
+  );
+
+  const restoreHomeDir = patchHomeDir(tempRoot);
+  try {
+    await providerMcpService.upsertProviderMcpServer('kiro', {
+      name: 'kiro-user-stdio',
+      scope: 'user',
+      transport: 'stdio',
+      command: 'node',
+      args: ['server.js'],
+      env: { API_KEY: 'x' },
+    });
+    await providerMcpService.upsertProviderMcpServer('kiro', {
+      name: 'kiro-project-http',
+      scope: 'project',
+      transport: 'http',
+      url: 'https://kiro.example.com/mcp',
+      headers: { Authorization: 'Bearer token' },
+      workspacePath,
+    });
+
+    const userConfig = await readJson(path.join(tempRoot, '.kiro', 'settings', 'mcp.json'));
+    assert.deepEqual(userConfig.powers, { mcpServers: {} });
+    const userServers = userConfig.mcpServers as Record<string, Record<string, unknown>>;
+    assert.equal(userServers.existing.disabled, true);
+    assert.equal(userServers['kiro-user-stdio'].command, 'node');
+    assert.deepEqual(userServers['kiro-user-stdio'].args, ['server.js']);
+    assert.deepEqual(userServers['kiro-user-stdio'].env, { API_KEY: 'x' });
+
+    const projectConfig = await readJson(path.join(workspacePath, '.kiro', 'settings', 'mcp.json'));
+    const projectHttp = (projectConfig.mcpServers as Record<string, Record<string, unknown>>)['kiro-project-http'];
+    assert.equal(projectHttp.url, 'https://kiro.example.com/mcp');
+    assert.deepEqual(projectHttp.headers, { Authorization: 'Bearer token' });
+
+    const grouped = await providerMcpService.listProviderMcpServers('kiro', { workspacePath });
+    assert.ok(grouped.user.some((server) => server.name === 'existing' && server.transport === 'stdio'));
+    assert.ok(grouped.user.some((server) => server.name === 'kiro-user-stdio' && server.transport === 'stdio'));
+    assert.ok(grouped.project.some((server) => server.name === 'kiro-project-http' && server.transport === 'http'));
+    assert.deepEqual(grouped.local, []);
+
+    await providerMcpService.removeProviderMcpServer('kiro', { name: 'kiro-user-stdio', scope: 'user' });
+    const afterRemove = await readJson(path.join(tempRoot, '.kiro', 'settings', 'mcp.json'));
+    assert.deepEqual(Object.keys(afterRemove.mcpServers as object), ['existing']);
+
+    await assert.rejects(
+      providerMcpService.upsertProviderMcpServer('kiro', {
+        name: 'kiro-sse',
+        scope: 'project',
+        transport: 'sse',
+        url: 'https://example.com/sse',
+        workspacePath,
+      }),
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.code === 'MCP_TRANSPORT_NOT_SUPPORTED' &&
+        error.statusCode === 400,
+    );
+
+    const brokenPath = path.join(workspacePath, '.kiro', 'settings', 'mcp.json');
+    await fs.writeFile(brokenPath, '{ not json', 'utf8');
+    await assert.rejects(
+      providerMcpService.upsertProviderMcpServer('kiro', {
+        name: 'kiro-broken',
+        scope: 'project',
+        transport: 'stdio',
+        command: 'node',
+        workspacePath,
+      }),
+      (error: unknown) => error instanceof AppError && error.code === 'KIRO_MCP_CONFIG_INVALID',
+    );
+    assert.equal(await fs.readFile(brokenPath, 'utf8'), '{ not json');
+  } finally {
+    restoreHomeDir();
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+/**
  * This test covers Cursor MCP JSON format and user/project scope persistence.
  */
 test('providerMcpService handles cursor MCP JSON config formats', { concurrency: false }, async () => {
@@ -314,15 +406,10 @@ test('providerMcpService global adder writes to all providers and rejects unsupp
     });
 
     assert.equal(globalResult.length, 5);
-    // Kiro's MCP adapter is still a stub (no scopes/transports declared
-    // supported until its task lands), so it reports a caught failure here
-    // while every other provider succeeds.
-    const [kiroResult, ...otherResults] = globalResult
-      .slice()
-      .sort((a, b) => (a.provider === 'kiro' ? -1 : b.provider === 'kiro' ? 1 : 0));
-    assert.equal(kiroResult.provider, 'kiro');
-    assert.equal(kiroResult.created, false);
-    assert.ok(otherResults.every((entry) => entry.created === true));
+    assert.ok(globalResult.every((entry) => entry.created === true));
+
+    const kiroProject = await readJson(path.join(workspacePath, '.kiro', 'settings', 'mcp.json'));
+    assert.ok((kiroProject.mcpServers as Record<string, unknown>)['global-http']);
 
     const claudeProject = await readJson(path.join(workspacePath, '.mcp.json'));
     assert.ok((claudeProject.mcpServers as Record<string, unknown>)['global-http']);
