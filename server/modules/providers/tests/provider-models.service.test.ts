@@ -360,7 +360,7 @@ test('custom Kiro models can declare reasoning levels, and only levels Kiro supp
   });
 
   const catalog = await service.getProviderModels('kiro');
-  assert.deepEqual(catalog.EFFORT_LEVELS, ['low', 'medium', 'high', 'xhigh', 'max']);
+  assert.deepEqual(catalog.EFFORT_LEVELS, ['none', 'low', 'medium', 'high', 'xhigh', 'max']);
   assert.ok(catalog.OPTIONS.find((option) => option.value === 'my-kiro-model')?.effort);
 
   await assert.rejects(
@@ -421,7 +421,7 @@ test('allowed effort levels come from the provider, not from the built-in models
     codex: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
     cursor: [],
     opencode: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'thinking'],
-    kiro: ['low', 'medium', 'high', 'xhigh', 'max'],
+    kiro: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
   };
   for (const [provider, levels] of Object.entries(expectedLevels) as Array<[LLMProvider, string[]]>) {
     assert.deepEqual((await service.getProviderModels(provider)).EFFORT_LEVELS, levels, provider);

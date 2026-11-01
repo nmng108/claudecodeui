@@ -30,5 +30,5 @@ test('resolveKiroEffort only sends a level the selected model declares', () => {
 test('Kiro advertises the agreed reasoning levels, weakest first', () => {
   const capabilities = providerCapabilitiesService.getProviderCapabilities('kiro');
   assert.equal(capabilities.supportsEffort, true);
-  assert.deepEqual(capabilities.effortLevels, ['low', 'medium', 'high', 'xhigh', 'max']);
+  assert.deepEqual(capabilities.effortLevels, ['none', 'low', 'medium', 'high', 'xhigh', 'max']);
 });

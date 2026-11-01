@@ -8,7 +8,9 @@ import { createCompleteMessage, createNormalizedMessage, generateMessageId } fro
 import { resolveKiroApiKey } from '@/modules/providers/list/kiro/kiro-api-key.store.js';
 import { KiroAcpClient } from '@/modules/providers/list/kiro/kiro-acp.client.js';
 import { buildKiroToolResult } from '@/modules/providers/list/kiro/kiro-tool-output.js';
-import { seedKiroModelCatalog } from '@/modules/providers/list/kiro/kiro-models.provider.js';
+import { parseKiroModelCatalog, seedKiroModelCatalog } from '@/modules/providers/list/kiro/kiro-models.provider.js';
+import { findKiroSessionDir, getKiroMessagesPath } from '@/modules/providers/list/kiro/kiro-paths.js';
+import { readKiroTranscriptUsage, sumKiroCredits } from '@/modules/providers/list/kiro/kiro-usage.js';
 
 /** Live ACP clients keyed by the app session id (falling back to the ACP session id for legacy/direct callers). */
 const activeKiroSessions = new Map();
@@ -122,6 +124,27 @@ async function runKiro(command, options = {}, ws, context) {
     }));
   };
 
+  // Kiro meters credits. The counter shows the session's running total (the
+  // transcript's earlier turns plus this run's) and the context-window share.
+  let sessionCredits = 0;
+  let contextPercentage = null;
+  const sendUsage = (activeSessionId) => {
+    ws.send(createNormalizedMessage({
+      kind: 'status',
+      text: 'token_budget',
+      tokenBudget: {
+        used: sessionCredits,
+        unit: 'credit',
+        contextPercentage,
+        inputTokens: 0,
+        outputTokens: 0,
+        breakdown: { input: 0, output: 0 },
+      },
+      sessionId: activeSessionId,
+      provider: 'kiro',
+    }));
+  };
+
   try {
     client = new KiroAcpClient({
       cwd: workingDirectory,
@@ -170,8 +193,23 @@ async function runKiro(command, options = {}, ws, context) {
               }
               break;
             }
-            case 'plan':
-              // No dedicated normalized "plan" message kind exists yet app-wide;
+            case 'config_option_update':
+              // v3 re-sends the option list whenever it changes (model, mode, effort).
+              seedKiroModelCatalog({ configOptions: event.configOptions });
+              break;
+            case 'session_info':
+              if (event.kind === 'context_usage') {
+                const percentage = event.meta.usagePercentage ?? event.meta.contextUsage?.usagePercentage;
+                if (typeof percentage === 'number') {
+                  contextPercentage = percentage;
+                  sendUsage(activeSessionId);
+                }
+              } else if (event.kind === 'turn_completion') {
+                sessionCredits += sumKiroCredits(event.meta.promptTurnSummaries);
+                sendUsage(activeSessionId);
+              }
+              break;
+            case 'plan':              // No dedicated normalized "plan" message kind exists yet app-wide;
               // riding on `status` (like Codex/Claude's `token_budget`) keeps this
               // forward-compatible without adding a MessageKind this task doesn't own.
               ws.send(createNormalizedMessage({ kind: 'status', text: 'plan', entries: event.entries, sessionId: activeSessionId, provider: 'kiro' }));
@@ -289,6 +327,12 @@ async function runKiro(command, options = {}, ws, context) {
 
     let sessionResult;
     if (providerSessionId) {
+      const priorDir = await findKiroSessionDir(providerSessionId);
+      if (priorDir) {
+        const prior = await readKiroTranscriptUsage(getKiroMessagesPath(priorDir));
+        sessionCredits = prior.credits;
+        contextPercentage = prior.contextPercentage;
+      }
       sessionResult = await client.resumeSession(providerSessionId);
     } else {
       sessionResult = await client.startSession();
@@ -318,7 +362,8 @@ async function runKiro(command, options = {}, ws, context) {
     // picker does not need its own `kiro-cli` process.
     seedKiroModelCatalog(sessionResult.raw);
 
-    const currentModelId = sessionResult.raw?.models?.currentModelId;
+    const currentModelId = parseKiroModelCatalog(sessionResult.raw)?.currentModelId
+      ?? sessionResult.raw?.models?.currentModelId;
     const resolvedModel = await context.resolveResumeModel(sessionId, model);
     if (resolvedModel && resolvedModel !== currentModelId) {
       try {

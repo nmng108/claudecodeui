@@ -91,7 +91,17 @@ test('Kiro runtime streams message, thought, tool call and result, then complete
     assert.ok(kinds.includes('thinking'));
     assert.ok(messages.some((m) => m.kind === 'stream_delta' && m.content === 'Hello from the fake agent'));
     assert.ok(messages.some((m) => m.kind === 'tool_use' && m.toolId === 'tool-1' && m.toolName === 'List files'));
-    assert.ok(messages.some((m) => m.kind === 'tool_result' && m.toolId === 'tool-1'));
+    // Only the finished tool produces a result, and it carries plain-text content.
+    const results = messages.filter((m) => m.kind === 'tool_result' && m.toolId === 'tool-1');
+    assert.equal(results.length, 1);
+    assert.equal(results[0].content, 'file1.txt\nfile2.txt');
+    assert.equal(results[0].isError, false);
+    assert.ok(messages.filter((m) => m.kind === 'tool_use').every((m) => m.content === undefined));
+    // Kiro reports credits and the context share, not tokens.
+    const budgets = messages.filter((m) => m.kind === 'status' && m.text === 'token_budget');
+    assert.equal(budgets.at(-1)?.tokenBudget.unit, 'credit');
+    assert.equal(budgets.at(-1)?.tokenBudget.used, 0.25);
+    assert.equal(budgets.at(-1)?.tokenBudget.contextPercentage, 12.5);
     assert.ok(messages.some((m) => m.kind === 'status' && m.stopReason === 'end_turn'));
     const complete = messages.filter((m) => m.kind === 'complete');
     assert.equal(complete.length, 1);

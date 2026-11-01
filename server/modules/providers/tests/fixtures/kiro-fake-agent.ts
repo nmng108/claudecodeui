@@ -37,6 +37,50 @@ import { writeFileSync } from 'node:fs';
 import { AgentSideConnection, ndJsonStream, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 
 const scenario = process.env.KIRO_FAKE_AGENT_SCENARIO || 'stream';
+/** The real CLI is launched with `--agent-engine=v3`; without it this fake behaves like the v2 server. */
+const isV3 = process.argv.includes('--agent-engine=v3');
+
+/** Config options as the v3 server advertises them (shape recorded from kiro-cli 2.37.0). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const configOptions: Array<Record<string, any>> = [
+  {
+    type: 'select',
+    id: 'model',
+    name: 'Model',
+    category: 'model',
+    currentValue: 'fake-model',
+    options: [
+      { value: 'auto', name: 'Auto', _meta: { kiro: { rateMultiplier: 1, rateUnit: 'Credit', hasEffort: false } } },
+      {
+        value: 'fake-model',
+        name: 'Fake Model',
+        description: 'A model used by tests',
+        _meta: {
+          kiro: {
+            rateMultiplier: 1.3,
+            rateUnit: 'Credit',
+            hasEffort: true,
+            effortLevels: ['low', 'medium', 'high'],
+            defaultEffortLevel: 'medium',
+          },
+        },
+      },
+    ],
+  },
+  {
+    type: 'select',
+    id: 'effortLevel',
+    name: 'Effort',
+    category: 'thought_level',
+    currentValue: 'medium',
+    options: [
+      { value: 'low', name: 'Low' },
+      { value: 'medium', name: 'Medium' },
+      { value: 'high', name: 'High' },
+    ],
+  },
+];
+let forkCounter = 0;
 
 let pendingCancel: (() => void) | null = null;
 let cancelled = false;
@@ -56,6 +100,7 @@ const connection = new AgentSideConnection((_client) => ({
       agentCapabilities: {
         loadSession: true,
         promptCapabilities: { image: false, audio: false, embeddedContext: true },
+        ...(isV3 ? { sessionCapabilities: { list: {}, close: {}, fork: { _meta: { kiro: { messageId: true } } } } } : {}),
       },
       authMethods: [],
     };
@@ -68,10 +113,29 @@ const connection = new AgentSideConnection((_client) => ({
         currentModeId: 'default',
         availableModes: [{ id: 'default', name: 'Default' }],
       },
-      models: {
-        currentModelId: 'fake-model',
-        availableModels: [{ modelId: 'fake-model', name: 'Fake Model' }],
-      },
+      ...(isV3
+        ? { configOptions: configOptions as never }
+        : {
+            models: {
+              currentModelId: 'fake-model',
+              availableModels: [{ modelId: 'fake-model', name: 'Fake Model' }],
+            },
+          }),
+    };
+  },
+
+  setSessionConfigOption(params: { configId: string; value: string | boolean }) {
+    return {
+      configOptions: configOptions.map((option) =>
+        option.id === params.configId ? { ...option, currentValue: params.value } : option) as never,
+    };
+  },
+
+  unstable_forkSession(params: { sessionId: string; _meta?: { [key: string]: unknown } | null }) {
+    forkCounter += 1;
+    return {
+      sessionId: `fake-fork-${forkCounter}-of-${params.sessionId}-at-${(params._meta?.kiro as { messageId?: string } | undefined)?.messageId ?? 'end'}`,
+      configOptions: configOptions as never,
     };
   },
 
@@ -163,10 +227,17 @@ const connection = new AgentSideConnection((_client) => ({
         toolCallId: 'tool-1',
         title: 'List files',
         kind: 'execute',
-        status: 'in_progress',
+        status: isV3 ? 'pending' : 'in_progress',
         rawInput: { command: 'ls' },
       },
     });
+    if (isV3) {
+      // v3 sends progress updates that carry neither output nor content.
+      await connection.sessionUpdate({
+        sessionId,
+        update: { sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'in_progress' },
+      });
+    }
     await connection.sessionUpdate({
       sessionId,
       update: {
@@ -176,6 +247,28 @@ const connection = new AgentSideConnection((_client) => ({
         rawOutput: 'file1.txt\nfile2.txt',
       },
     });
+    if (isV3) {
+      await connection.sessionUpdate({
+        sessionId,
+        update: {
+          sessionUpdate: 'session_info_update',
+          _meta: { kiro: { kind: 'context_usage', usagePercentage: 12.5, contextUsage: { usagePercentage: 12.5 } } },
+        },
+      });
+      await connection.sessionUpdate({
+        sessionId,
+        update: {
+          sessionUpdate: 'session_info_update',
+          _meta: {
+            kiro: {
+              kind: 'turn_completion',
+              status: 'success',
+              promptTurnSummaries: [{ unit: 'credit', unitPlural: 'credits', usage: 0.25 }],
+            },
+          },
+        },
+      });
+    }
     await connection.extNotification('_kiro.dev/metadata', { contextUsagePercentage: 12, turnDurationMs: 42 });
     await connection.extNotification('_kiro.dev/some_unknown_notification', { ignored: true });
 

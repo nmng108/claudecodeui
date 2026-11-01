@@ -18,18 +18,18 @@ test('buildKiroToolResult always returns string content, even with no output', (
   assert.equal(buildKiroToolResult({ status: 'completed', rawOutput: null })?.content, '');
 });
 
-test('buildKiroToolResult prefers rawOutput, then falls back to ACP content blocks', () => {
+test('buildKiroToolResult prefers the ACP content blocks, then rawOutput', () => {
+  const block = [{ type: 'content', content: { type: 'text', text: 'from block' } }];
   assert.equal(buildKiroToolResult({ status: 'completed', rawOutput: 'out' })?.content, 'out');
   assert.equal(buildKiroToolResult({ status: 'completed', rawOutput: { a: 1 } })?.content, '{"a":1}');
+  assert.equal(buildKiroToolResult({ status: 'completed', content: block })?.content, 'from block');
+  assert.equal(buildKiroToolResult({ status: 'completed', content: block, rawOutput: 'raw' })?.content, 'from block');
+  // A Kiro tool object: the readable message is used, not the JSON.
   assert.equal(
-    buildKiroToolResult({
-      status: 'completed',
-      content: [{ type: 'content', content: { type: 'text', text: 'from block' } }],
-    })?.content,
-    'from block',
+    buildKiroToolResult({ status: 'completed', rawOutput: { output: 'hi', exitCode: 0, message: 'Output:\nhi' } })?.content,
+    'Output:\nhi',
   );
 });
-
 test('buildKiroToolResult marks failed tools as errors', () => {
   const result = buildKiroToolResult({ status: 'failed', rawOutput: 'boom' });
   assert.equal(result?.isError, true);

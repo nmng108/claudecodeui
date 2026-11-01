@@ -9,7 +9,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 /**
  * Flattens ACP tool-call content (`[{ type: 'content', content: { type: 'text', text } }, ...]`,
- * or bare text blocks) into text. Diffs and terminals become a short label.
+ * or bare text blocks) into text. Diffs become a short label.
  */
 export function acpContentToText(content: unknown): string {
   if (typeof content === 'string') {
@@ -37,13 +37,25 @@ export function acpContentToText(content: unknown): string {
   return parts.join('\n');
 }
 
-/** Serializes `rawOutput` without ever returning a non-string. */
+/**
+ * Text for a tool's `rawOutput`. Kiro's own tools return an object such as
+ * `{ output, exitCode, message }`, where `message` is the readable form; any
+ * other shape is serialized as JSON. Never returns a non-string.
+ */
 function rawOutputToText(rawOutput: unknown): string {
   if (rawOutput === undefined || rawOutput === null) {
     return '';
   }
   if (typeof rawOutput === 'string') {
     return rawOutput;
+  }
+  if (isRecord(rawOutput)) {
+    for (const key of ['message', 'output']) {
+      const value = rawOutput[key];
+      if (typeof value === 'string' && value) {
+        return value;
+      }
+    }
   }
   try {
     return JSON.stringify(rawOutput) ?? '';
@@ -71,7 +83,8 @@ export function buildKiroToolResult(update: {
     return null;
   }
 
-  const text = rawOutputToText(update.rawOutput) || acpContentToText(update.content);
+  // The ACP content blocks are what Kiro shows its own users, so they win over the raw payload.
+  const text = acpContentToText(update.content) || rawOutputToText(update.rawOutput);
   return {
     content: text,
     isError: update.status === 'failed',

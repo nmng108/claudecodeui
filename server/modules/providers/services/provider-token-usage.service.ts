@@ -6,6 +6,8 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 
 import { sessionsDb } from '@/modules/database/index.js';
+import { findKiroSessionDir, getKiroMessagesPath } from '@/modules/providers/list/kiro/kiro-paths.js';
+import { readKiroTranscriptUsage } from '@/modules/providers/list/kiro/kiro-usage.js';
 import type { AnyRecord } from '@/shared/types.js';
 import { AppError, getOpenCodeDatabasePath } from '@/shared/utils.js';
 
@@ -42,6 +44,10 @@ type TokenUsageResult = {
     input: number;
     output: number;
   };
+  /** Set when used is not a token count (Kiro reports credits). */
+  unit?: 'credit';
+  /** Share of the context window in use (0-100), when the provider reports it as a percentage. */
+  contextPercentage?: number | null;
   unsupported?: boolean;
   message?: string;
 };
@@ -449,20 +455,22 @@ export function createProviderTokenUsageService(
       }
 
       if (session.provider === 'kiro') {
-        // Kiro records only a context-usage percentage (session_metadata /
-        // contextUsage), never token counts, so the token counter has nothing
-        // to show. supportsTokenUsage stays false for Kiro.
+        // Kiro meters credits rather than tokens: `used` is the session's total
+        // credits (from the transcript's `usage_summary` lines) and
+        // `contextPercentage` the share of the context window in use.
+        const sessionDir = await findKiroSessionDir(providerSessionId);
+        const usage = sessionDir
+          ? await readKiroTranscriptUsage(getKiroMessagesPath(sessionDir))
+          : { credits: 0, contextPercentage: null };
         return {
-          used: 0,
-          total: 0,
+          used: usage.credits,
+          unit: 'credit',
+          contextPercentage: usage.contextPercentage,
           inputTokens: 0,
           outputTokens: 0,
           breakdown: { input: 0, output: 0 },
-          unsupported: true,
-          message: 'Token usage tracking not available for Kiro sessions',
         };
       }
-
       if (session.provider === 'opencode') {
         const databasePath = dependencies.getOpenCodeDatabasePath();
         if (!dependencies.fileExists(databasePath)) {

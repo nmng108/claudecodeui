@@ -27,6 +27,7 @@ function makeClient(overrides: {
   apiKey?: string;
   events?: ConstructorParameters<typeof KiroAcpClient>[0]['events'];
   extraEnv?: Record<string, string>;
+  engine?: 'v2' | 'v3';
 }): KiroAcpClient {
   if (overrides.scenario || overrides.extraEnv) {
     Object.assign(process.env, {
@@ -41,6 +42,8 @@ function makeClient(overrides: {
     commandArgs: [...NODE_TYPE_STRIP_ARGS, FIXTURE_PATH],
     initTimeoutMs: 5000,
     events: overrides.events,
+    // Most cases run the default (v3) engine; v2-specific ones pass engine: 'v2'.
+    engine: overrides.engine,
   });
 }
 
@@ -57,12 +60,13 @@ async function withTempDir<T>(run: (dir: string) => Promise<T>): Promise<T> {
   }
 }
 
-test('connects, starts a session, and streams a full prompt turn', async () => {
+test('v2: connects, starts a session, and streams a full prompt turn', async () => {
   await withTempDir(async (cwd) => {
     const events: unknown[] = [];
     const client = makeClient({
       scenario: 'stream',
       cwd,
+      engine: 'v2',
       events: {
         onSessionUpdate: (event) => events.push(event),
         onExtNotification: (event) => events.push(event),
@@ -320,12 +324,13 @@ test.after(() => {
   delete process.env.KIRO_FAKE_AGENT_KEY_SINK;
 });
 
-test('setModel is accepted and setEffort runs its own turn without reaching the chat', async () => {
+test('v2: setModel is accepted and setEffort runs its own turn without reaching the chat', async () => {
   await withTempDir(async (cwd) => {
     const events: unknown[] = [];
     const client = makeClient({
       scenario: 'stream',
       cwd,
+      engine: 'v2',
       events: { onSessionUpdate: (event) => events.push(event) },
     });
     try {
@@ -340,6 +345,98 @@ test('setModel is accepted and setEffort runs its own turn without reaching the 
       assert.ok(events.length > 0, 'updates flow again after the effort turn');
 
       await assert.rejects(() => client.setEffort('high; rm -rf'), /Invalid Kiro effort level/);
+    } finally {
+      await client.close();
+    }
+  });
+});
+
+test('v3: advertises forking and exposes the model option on session/new', async () => {
+  await withTempDir(async (cwd) => {
+    const client = makeClient({ scenario: 'stream', cwd, engine: 'v3' });
+    try {
+      assert.equal(client.getEngine(), 'v3');
+      await client.connect();
+      assert.equal(client.supportsFork(), true);
+      const { raw } = await client.startSession();
+      const options = raw.configOptions as Array<{ id: string }>;
+      assert.deepEqual(options.map((option) => option.id), ['model', 'effortLevel']);
+    } finally {
+      await client.close();
+    }
+  });
+});
+
+test('v3: maps session_info_update and keeps tool progress updates', async () => {
+  await withTempDir(async (cwd) => {
+    const events: Array<{ type: string; kind?: string; status?: string }> = [];
+    const client = makeClient({
+      scenario: 'stream',
+      cwd,
+      engine: 'v3',
+      events: { onSessionUpdate: (event) => events.push(event as { type: string }) },
+    });
+    try {
+      await client.connect();
+      await client.startSession();
+      await client.prompt('hi');
+      const describe = (event: { type: string; kind?: string; status?: string }) =>
+        event.type === 'session_info' ? `session_info:${event.kind}` : `${event.type}:${event.status ?? ''}`;
+      assert.deepEqual(events.map(describe), [
+        'agent_thought_chunk:',
+        'agent_message_chunk:',
+        'tool_call:pending',
+        'tool_call_update:in_progress',
+        'tool_call_update:completed',
+        'session_info:context_usage',
+        'session_info:turn_completion',
+      ]);
+    } finally {
+      await client.close();
+    }
+  });
+});
+test('v3: setModel and setEffort use config options and do not run a turn', async () => {
+  await withTempDir(async (cwd) => {
+    const events: unknown[] = [];
+    const client = makeClient({ scenario: 'stream', cwd, engine: 'v3', events: { onSessionUpdate: (event) => events.push(event) } });
+    try {
+      await client.connect();
+      await client.startSession();
+      await client.setModel('fake-model');
+      await client.setEffort('high');
+      assert.equal(events.length, 0);
+      const options = await client.setConfigOption('effortLevel', 'low');
+      assert.equal((options as Array<{ id: string; currentValue: string }>).find((o) => o.id === 'effortLevel')?.currentValue, 'low');
+      await assert.rejects(() => client.setEffort('high; rm -rf'), /Invalid Kiro effort level/);
+    } finally {
+      await client.close();
+    }
+  });
+});
+
+test('v3: forkSession sends the message id under _meta.kiro', async () => {
+  await withTempDir(async (cwd) => {
+    const client = makeClient({ scenario: 'stream', cwd, engine: 'v3' });
+    try {
+      await client.connect();
+      await client.startSession();
+      assert.match((await client.forkSession({ messageId: 'msg-1' })).sessionId, /at-msg-1$/);
+      assert.match((await client.forkSession()).sessionId, /at-end$/);
+    } finally {
+      await client.close();
+    }
+  });
+});
+
+test('v2: forking is not offered', async () => {
+  await withTempDir(async (cwd) => {
+    const client = makeClient({ scenario: 'stream', cwd, engine: 'v2' });
+    try {
+      await client.connect();
+      await client.startSession();
+      assert.equal(client.supportsFork(), false);
+      await assert.rejects(() => client.forkSession(), /does not support forking/);
     } finally {
       await client.close();
     }

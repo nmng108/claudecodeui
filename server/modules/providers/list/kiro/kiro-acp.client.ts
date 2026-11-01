@@ -26,6 +26,19 @@ const KIRO_CLI_PATH_ENV = 'KIRO_CLI_PATH';
 const DEFAULT_INIT_TIMEOUT_MS = 20_000;
 /** Grace period between SIGTERM and SIGKILL when tearing a session down. */
 const KILL_GRACE_MS = 3000;
+/** Env var that selects the CLI engine; anything but `v2` means v3. */
+const KIRO_ENGINE_ENV = 'CLOUDCLI_KIRO_ENGINE';
+
+/**
+ * Which `kiro-cli acp` server generation to speak to. V3 is the default; v2 is
+ * kept as an opt-out (`CLOUDCLI_KIRO_ENGINE=v2`) for installs that predate it.
+ * The two differ in launch flags, model/effort selection and session updates.
+ */
+export type KiroEngine = 'v2' | 'v3';
+
+export function resolveKiroEngine(): KiroEngine {
+  return process.env[KIRO_ENGINE_ENV]?.trim().toLowerCase() === 'v2' ? 'v2' : 'v3';
+}
 
 export type KiroPermissionOption = { optionId: string; name: string; kind: string };
 
@@ -62,7 +75,10 @@ export type KiroSessionUpdateEvent =
       locations?: unknown;
     }
   | { type: 'plan'; entries: unknown[] }
-  | { type: 'tool_call_chunk'; toolCallId?: string; title?: string; kind?: string; content?: unknown }
+  /** v3 `session_info_update`: `kind` is `_meta.kiro.kind` (context_usage, turn_completion, ...). */
+  | { type: 'session_info'; kind: string; title?: string; meta: Record<string, unknown> }
+  /** v3 `config_option_update`: the full, current list of config options. */
+  | { type: 'config_option_update'; configOptions: unknown[] }  | { type: 'tool_call_chunk'; toolCallId?: string; title?: string; kind?: string; content?: unknown }
   | { type: 'retry_warning'; attempt?: number; maxAttempts?: number; delaySecs?: number; message?: string }
   | { type: 'unknown'; sessionUpdate: string; raw: unknown };
 
@@ -98,6 +114,8 @@ export type KiroAcpClientOptions = {
   commandArgs?: string[];
   initTimeoutMs?: number;
   events?: KiroAcpClientEvents;
+  /** Defaults to esolveKiroEngine(). */
+  engine?: KiroEngine;
 };
 
 /**
@@ -153,6 +171,20 @@ function toSessionUpdateEvent(update: Record<string, unknown>): KiroSessionUpdat
         rawOutput: update.rawOutput,
         locations: update.locations,
       };
+    case 'session_info_update': {
+      const meta = ((update._meta as Record<string, unknown> | undefined)?.kiro ?? {}) as Record<string, unknown>;
+      return {
+        type: 'session_info',
+        kind: typeof meta.kind === 'string' ? meta.kind : '',
+        ...(typeof update.title === 'string' ? { title: update.title } : {}),
+        meta,
+      };
+    }
+    case 'config_option_update':
+      return {
+        type: 'config_option_update',
+        configOptions: Array.isArray(update.configOptions) ? update.configOptions : [],
+      };
     case 'plan':
       return { type: 'plan', entries: (update.entries as unknown[]) || [] };
     case 'tool_call_chunk':
@@ -198,11 +230,13 @@ export class KiroAcpClient {
   private readonly commandArgs: string[];
   private readonly initTimeoutMs: number;
   private readonly events: KiroAcpClientEvents;
+  private readonly engine: KiroEngine;
 
   private child: ChildProcess | null = null;
   private connection: ClientSideConnection | null = null;
   private sessionId: string | null = null;
   private stderrTail = '';
+  private initializeResponse: Record<string, unknown> | null = null;
   private closed = false;
   private crashNotified = false;
   /** While true, session updates are dropped (used for the internal `/effort` turn). */
@@ -220,6 +254,23 @@ export class KiroAcpClient {
     this.commandArgs = options.commandArgs ?? [];
     this.initTimeoutMs = options.initTimeoutMs ?? DEFAULT_INIT_TIMEOUT_MS;
     this.events = options.events ?? {};
+    this.engine = options.engine ?? resolveKiroEngine();
+  }
+
+  /** The engine this client speaks. */
+  getEngine(): KiroEngine {
+    return this.engine;
+  }
+
+  /** The initialize response, once connected. */
+  getInitializeResponse(): Record<string, unknown> | null {
+    return this.initializeResponse;
+  }
+
+  /** True when the agent advertised session/fork during initialize. */
+  supportsFork(): boolean {
+    const caps = this.initializeResponse?.agentCapabilities as { sessionCapabilities?: { fork?: unknown } } | undefined;
+    return Boolean(caps?.sessionCapabilities?.fork);
   }
 
   /** The ACP session id, once a session has been created or loaded. */
@@ -239,7 +290,7 @@ export class KiroAcpClient {
   async connect(): Promise<{ initializeResponse: Record<string, unknown> }> {
     const apiKey = this.apiKeyOverride ?? (await resolveKiroApiKey());
 
-    const child = crossSpawn(this.command, [...this.commandArgs, 'acp'], {
+    const child = crossSpawn(this.command, [...this.commandArgs, 'acp', ...(this.engine === 'v3' ? ['--agent-engine=v3'] : [])], {
       cwd: this.cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
       // The key is layered onto a copy of the host env for this child only;
@@ -338,7 +389,8 @@ export class KiroAcpClient {
       throw failure;
     }
 
-    return { initializeResponse: initializeResponse as unknown as Record<string, unknown> };
+    this.initializeResponse = initializeResponse as unknown as Record<string, unknown>;
+    return { initializeResponse: this.initializeResponse };
   }
 
   /** Creates a brand-new ACP session and returns its id plus whatever models/modes kiro-cli advertised. */
@@ -355,35 +407,51 @@ export class KiroAcpClient {
   /** Resumes a known provider-native session id via `session/load`. */
   async resumeSession(providerSessionId: string): Promise<{ sessionId: string; raw: Record<string, unknown> }> {
     const connection = this.requireConnection();
-    const result = await connection.loadSession({
-      sessionId: providerSessionId,
-      cwd: this.cwd,
-      mcpServers: [],
-    } as Parameters<ClientSideConnection['loadSession']>[0]);
+    // The agent replays the whole transcript as live-looking updates while it
+    // loads; the UI already has that history, so the replay is dropped.
+    this.muted = true;
+    let result;
+    try {
+      result = await connection.loadSession({
+        sessionId: providerSessionId,
+        cwd: this.cwd,
+        mcpServers: [],
+      } as Parameters<ClientSideConnection['loadSession']>[0]);
+    } finally {
+      this.muted = false;
+    }
     const raw = result as unknown as Record<string, unknown>;
     this.sessionId = providerSessionId;
     return { sessionId: providerSessionId, raw };
   }
 
   /**
-   * Switches the session's model. Kiro takes the ACP `session/set_model`
-   * request, which the current SDK no longer wraps, so it goes out as a raw
-   * extension request.
+   * Switches the session's model: v3 through the advertised `model` config
+   * option, v2 through `session/set_model` (which the SDK no longer wraps, so it
+   * goes out as a raw extension request).
    */
   async setModel(modelId: string): Promise<void> {
+    if (this.engine === 'v3') {
+      await this.setConfigOption('model', modelId);
+      return;
+    }
     const connection = this.requireConnection();
     const sessionId = this.requireSessionId();
     await connection.extMethod('session/set_model', { sessionId, modelId });
   }
 
   /**
-   * Sets the reasoning level with Kiro's `/effort <level>` command, the same
-   * way kiro-ui does. The command runs as a prompt turn, so its output is muted
-   * and never reaches the chat.
+   * Sets the reasoning level: v3 through the `effortLevel` config option, v2
+   * with Kiro's `/effort <level>` command (run as a muted prompt turn, the way
+   * kiro-ui does it).
    */
   async setEffort(level: string): Promise<void> {
     if (!/^[a-z]{1,20}$/.test(level)) {
       throw new AppError('Invalid Kiro effort level.', { code: 'KIRO_INVALID_EFFORT', statusCode: 400 });
+    }
+    if (this.engine === 'v3') {
+      await this.setConfigOption('effortLevel', level);
+      return;
     }
     this.muted = true;
     try {
@@ -393,6 +461,43 @@ export class KiroAcpClient {
     }
   }
 
+  /** v3 `session/set_config_option`; resolves with the updated option list. */
+  async setConfigOption(configId: string, value: string): Promise<unknown[]> {
+    const connection = this.requireConnection();
+    const sessionId = this.requireSessionId();
+    const response = await connection.setSessionConfigOption({
+      sessionId,
+      configId,
+      value,
+    } as Parameters<ClientSideConnection['setSessionConfigOption']>[0]);
+    const options = (response as unknown as { configOptions?: unknown[] }).configOptions;
+    return Array.isArray(options) ? options : [];
+  }
+
+  /**
+   * v3 `session/fork`: copies the current session into a new one. With
+   * `messageId` (a user message id from the transcript) the copy ends after
+   * that message's turn, answer included; Kiro reads it from `_meta.kiro`
+   * (a top-level `messageId` is ignored and would copy everything).
+   */
+  async forkSession(options: { messageId?: string } = {}): Promise<{ sessionId: string; raw: Record<string, unknown> }> {
+    if (!this.supportsFork()) {
+      throw new AppError('This Kiro CLI does not support forking sessions.', {
+        code: 'KIRO_FORK_UNSUPPORTED',
+        statusCode: 501,
+      });
+    }
+    const connection = this.requireConnection();
+    const sessionId = this.requireSessionId();
+    const response = await connection.unstable_forkSession({
+      sessionId,
+      cwd: this.cwd,
+      mcpServers: [],
+      ...(options.messageId ? { _meta: { kiro: { messageId: options.messageId } } } : {}),
+    } as Parameters<ClientSideConnection['unstable_forkSession']>[0]);
+    const raw = response as unknown as Record<string, unknown>;
+    return { sessionId: raw.sessionId as string, raw };
+  }
   /** Sends one prompt turn and resolves with its stop reason once the agent finishes (or is cancelled). */
   async prompt(text: string): Promise<{ stopReason: string }> {
     const connection = this.requireConnection();

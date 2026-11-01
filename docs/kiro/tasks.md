@@ -15,6 +15,9 @@ Legend: `[x]` done and committed, `[~]` code written but uncommitted/unverified,
 - [x] **T6** MCP, skills, token usage, fork/rewind capability, tests.
 - [x] **T7** Frontend: picker, login modal with API key, MCP constants, settings, api-docs, tests. (commit c36378c4)
 - [x] **T8** `docker/standard/Dockerfile`, `docker-compose.yml`, docs.
+- [x] **T6a** Fix: tool results without content crashed the chat UI (commit 08eb451a).
+- [x] **T6b** Upgrade the ACP integration to the Kiro CLI v3 engine (see the T6b section below).
+- [ ] **T6c** Browser end-to-end tests (Playwright).
 - [ ] **T9** Verify (typecheck, lint, test, test:client, build), publish, Docker check, push.
 
 Each task ends with a conventional-commit commit.
@@ -194,3 +197,32 @@ Replaces the T3 stubs `kiro-models.provider.ts`, `kiro-sessions.provider.ts`, `k
 - Token usage: stays `unsupported`. Kiro records only a context-usage percentage (`session_metadata` / `contextUsage` in `messages.jsonl`), not token counts, and the counter shows tokens. `supportsTokenUsage` stays false.
 - Capabilities: `supportsAbort` and `supportsPermissionRequests` are now true (the T4 runtime implements both). `supportsImages` / `supportsFiles` stay false (attachments go as text tags). Fork, rewind and message editing stay unsupported (`supportsSessionForking` and `supportsMessageEditing` false); no `_kiro.dev/*` command was found for them.
 - Tests: new Kiro cases in `mcp.test.ts` (including the global adder, now 5 successes) and `skills.test.ts`. Provider suite: 437 tests, 13 fail, all in the pre-existing `claude-auth` and `claude-runtime-hold` files. Server tsc clean, oxlint 0 errors, related client tests pass.
+
+### T6a fix and T6b v3 upgrade (2026-11-01)
+
+**Why:** the first ACP client launched `kiro-cli acp` with no engine flag, which starts the v2 server. v2 advertises empty `sessionCapabilities`, so T4 to T6 wrongly concluded that fork, rewind and usage were unsupported. The v3 server (`--agent-engine=v3`, documented in `https://kiro.dev/docs/cli/v3/acp-migration.md`) supports them. Verified against kiro-cli 2.37.0 with a real API key.
+
+**T6a (the crash):** a `tool_call_update` without content reached the UI as a `tool_result` whose message-level `content` was undefined, and `formatToolResultContent` called `.trim()` on `JSON.stringify(undefined)`. Fixed on both sides: the runtime now emits a `tool_result` only when the tool is `completed` or `failed`, with plain-text `content` and `isError` (`kiro-tool-output.ts`), and the UI helper tolerates missing content. Regression tests on both sides.
+
+**Facts recorded from the live v3 server:**
+- Launch: `kiro-cli acp --agent-engine=v3` (auth from `KIRO_API_KEY` works as before). The v2-only flags (`--agent`, `--model`, `--effort`, trust flags) are not used. `CLOUDCLI_KIRO_ENGINE=v2` keeps the old behavior.
+- `initialize` advertises `sessionCapabilities {list, close, delete, fork}` and `_meta.kiro.extensionMethods` (`_kiro/session/context`, `_kiro/session/compact`, `_kiro/session/export`, `_kiro/session/history`, workflow and memory methods). `_kiro/account/getUsage` is NOT advertised on this build.
+- `session/new` returns `configOptions`: `mode`, `model`, `effortLevel` (`thought_level`), `thinking`, `autopilot`, ... Each `model` option carries `_meta.kiro` with `effortLevels`, `defaultEffortLevel`, `hasEffort` and `rateMultiplier` (credits). Model and effort are changed with `session/set_config_option` (`configId` `model` / `effortLevel`). `session/set_model` does not exist.
+- Updates: `tool_call` starts as `pending`; `tool_call_update` has `in_progress` (no output) then `completed` with `rawOutput` (an object such as `{output, exitCode, message}`) and `content` blocks. `session_info_update` is dispatched on `_meta.kiro.kind`: `context_usage` (`usagePercentage`), `turn_completion` (`promptTurnSummaries[{unit:'credit', usage}]`), `display_error`, `focus_update`, `turn_end`, `pending_interaction`. The prompt response, not `turn_end`, ends a turn.
+- Permissions use the standard `options[]` (`accept`, `always-accept`, `reject`, `always-reject`); the runtime still returns one-time options only.
+- `session/load` replays the whole transcript as updates; the client mutes them while loading.
+- `session/fork` takes the cut point in `_meta.kiro.messageId` (a top-level `messageId` is ignored and copies everything). The id is a user message's `id` in `messages.jsonl`. The copy ends after that message's turn, answer included.
+
+**What changed**
+- `kiro-acp.client.ts`: `engine` (v3 default), `--agent-engine=v3`, `getInitializeResponse`, `supportsFork`, `setConfigOption`, `forkSession`, `session_info` and `config_option_update` events, replay muted during `resumeSession`. `setModel`/`setEffort` use config options on v3 and the old paths on v2.
+- `kiro-models.provider.ts`: the catalog now comes from the `model` config option, with per-model reasoning levels and the default level (v2 `models` still parsed). The Model library shows the real levels per model; `none` is added to the Kiro capability levels because some models offer it.
+- `kiro-usage.ts`, runtime and token-usage service: Kiro usage is credits plus context percentage. The live stream, the transcript (`usage_summary`, `contextUsage`) and `GET token-usage` all report `{used: credits, unit: 'credit', contextPercentage}`. `TokenUsageSummary` shows credits for Kiro. `supportsTokenUsage` is now true.
+- `kiro-fork.provider.ts`: forks through `session/fork`; `supportsSessionForking` is true. User messages carry `transcriptAnchorId` (the transcript line id).
+- Capabilities: `supportsAbort` and `supportsPermissionRequests` true since T6.
+- Fake agent fixture speaks both engines. Tests added for the client (v3), models, usage, tool output, runtime.
+
+**Still not done / by design**
+- Message editing (rewind and resend) is not offered; `/rewind` equals fork at a message in v3, so "fork from here" covers it. Editing needs a resume-through-anchor runtime path.
+- The `/cost` slash command modal still labels numbers as tokens (it is built from a different server path).
+- Sidebar listing, history and delete stay file-based (Kiro advises `session/list`, but that needs a running `kiro-cli`; the file reader works offline). Revisit if Kiro changes the on-disk layout.
+- Persistent permission choices (`always-accept`), `_kiro/mcp/status`, `_kiro/session/compact` and context breakdown are not surfaced in the UI.

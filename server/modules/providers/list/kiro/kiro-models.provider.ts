@@ -30,7 +30,16 @@ export const KIRO_PREDEFINED_MODELS: ProviderModelsDefinition = {
 };
 
 /** One entry of the `availableModels` array in the ACP `session/new` response. */
-export type KiroDiscoveredModel = { modelId: string; name?: string; description?: string };
+export type KiroDiscoveredModel = {
+  modelId: string;
+  name?: string;
+  description?: string;
+  /** Reasoning levels this model accepts (v3 `_meta.kiro.effortLevels`); absent when it has none. */
+  effortLevels?: string[];
+  defaultEffortLevel?: string;
+  /** Credits charged per unit of usage relative to the base rate (v3 `_meta.kiro.rateMultiplier`). */
+  rateMultiplier?: number;
+};
 
 /** What a catalog read returns: the advertised models and the one Kiro would use by default. */
 export type KiroModelCatalog = { models: KiroDiscoveredModel[]; currentModelId?: string };
@@ -50,6 +59,59 @@ const readString = (value: unknown): string | undefined =>
  * Returns `null` when the response advertises no usable models.
  */
 export function parseKiroModelCatalog(raw: unknown): KiroModelCatalog | null {
+  return parseConfigOptionModels(raw) ?? parseLegacyModels(raw);
+}
+
+/** v3: the `model` select in the `configOptions` of a `session/new` / `session/fork` response. */
+function parseConfigOptionModels(raw: unknown): KiroModelCatalog | null {
+  const configOptions = (raw as { configOptions?: unknown } | null)?.configOptions;
+  if (!Array.isArray(configOptions)) {
+    return null;
+  }
+  const modelOption = configOptions.find(
+    (option) => (option as { id?: unknown } | null)?.id === 'model',
+  ) as { currentValue?: unknown; options?: unknown } | undefined;
+  if (!modelOption || !Array.isArray(modelOption.options)) {
+    return null;
+  }
+
+  const seen = new Set<string>();
+  const discovered: KiroDiscoveredModel[] = [];
+  for (const entry of modelOption.options) {
+    const record = entry as {
+      value?: unknown;
+      name?: unknown;
+      description?: unknown;
+      _meta?: { kiro?: Record<string, unknown> };
+    } | null;
+    const modelId = readString(record?.value);
+    if (!modelId || seen.has(modelId)) {
+      continue;
+    }
+    seen.add(modelId);
+    const meta = record?._meta?.kiro ?? {};
+    const effortLevels = Array.isArray(meta.effortLevels)
+      ? meta.effortLevels.map(readString).filter((level): level is string => Boolean(level))
+      : [];
+    discovered.push({
+      modelId,
+      ...(readString(record?.name) ? { name: readString(record?.name) } : {}),
+      ...(readString(record?.description) ? { description: readString(record?.description) } : {}),
+      ...(meta.hasEffort !== false && effortLevels.length > 0 ? { effortLevels } : {}),
+      ...(readString(meta.defaultEffortLevel) ? { defaultEffortLevel: readString(meta.defaultEffortLevel) } : {}),
+      ...(typeof meta.rateMultiplier === 'number' ? { rateMultiplier: meta.rateMultiplier } : {}),
+    });
+  }
+
+  if (discovered.length === 0) {
+    return null;
+  }
+  const currentModelId = readString(modelOption.currentValue);
+  return { models: discovered, ...(currentModelId ? { currentModelId } : {}) };
+}
+
+/** v2: the `models.availableModels` field of a `session/new` response. */
+function parseLegacyModels(raw: unknown): KiroModelCatalog | null {
   const models = (raw as { models?: { availableModels?: unknown; currentModelId?: unknown } } | null)?.models;
   if (!models || !Array.isArray(models.availableModels)) {
     return null;
@@ -77,14 +139,24 @@ export function parseKiroModelCatalog(raw: unknown): KiroModelCatalog | null {
 
   return { models: discovered, ...(readString(models.currentModelId) ? { currentModelId: readString(models.currentModelId) } : {}) };
 }
-
 /** Turns a discovered catalog into the provider-neutral model definition. */
 export function buildKiroModelsDefinition(catalog: KiroModelCatalog): ProviderModelsDefinition {
   const options: ProviderModelOption[] = catalog.models.map((model) => ({
     value: model.modelId,
     label: model.name ?? model.modelId,
     ...(model.description ? { description: model.description } : {}),
+    ...(model.effortLevels?.length
+      ? {
+          effort: {
+            ...(model.defaultEffortLevel && model.effortLevels.includes(model.defaultEffortLevel)
+              ? { default: model.defaultEffortLevel }
+              : {}),
+            values: model.effortLevels.map((value) => ({ value })),
+          },
+        }
+      : {}),
   }));
+
   const current = catalog.currentModelId;
   const defaultModel = current && options.some((option) => option.value === current)
     ? current

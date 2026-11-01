@@ -164,3 +164,33 @@ test('getCurrentActiveModel reads the session model from session.json, else the 
     assert.deepEqual(await models.getCurrentActiveModel(), { model: 'claude-sonnet-5.5' });
   });
 });
+
+test('parseKiroModelCatalog reads the v3 model config option with per-model effort levels', () => {
+  const catalog = parseKiroModelCatalog({
+    configOptions: [
+      { id: 'mode', currentValue: 'vibe', options: [] },
+      {
+        id: 'model',
+        currentValue: 'claude-sonnet-5.5',
+        options: [
+          { value: 'auto', name: 'Auto', _meta: { kiro: { hasEffort: false, rateMultiplier: 1 } } },
+          {
+            value: 'claude-sonnet-5.5',
+            name: 'Claude Sonnet 5.5',
+            description: 'Sonnet',
+            _meta: { kiro: { hasEffort: true, effortLevels: ['low', 'high'], defaultEffortLevel: 'high', rateMultiplier: 1.3 } },
+          },
+        ],
+      },
+    ],
+  });
+
+  assert.equal(catalog?.currentModelId, 'claude-sonnet-5.5');
+  assert.equal(catalog?.models[0].effortLevels, undefined);
+  assert.deepEqual(catalog?.models[1].effortLevels, ['low', 'high']);
+
+  const definition = buildKiroModelsDefinition(catalog!);
+  assert.equal(definition.DEFAULT, 'claude-sonnet-5.5');
+  assert.equal(definition.OPTIONS[0].effort, undefined);
+  assert.deepEqual(definition.OPTIONS[1].effort, { default: 'high', values: [{ value: 'low' }, { value: 'high' }] });
+});

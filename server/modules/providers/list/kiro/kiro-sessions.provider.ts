@@ -78,7 +78,15 @@ export function normalizeKiroTranscriptLines(
       case 'user': {
         const content = readText(payload.content);
         if (content) {
-          messages.push(createNormalizedMessage({ ...base, kind: 'text', role: 'user', content }));
+          // Kiro forks at a user message id, which is the transcript line's own id.
+          const anchorId = readText(row.id);
+          messages.push(createNormalizedMessage({
+            ...base,
+            kind: 'text',
+            role: 'user',
+            content,
+            ...(anchorId ? { transcriptAnchorId: anchorId } : {}),
+          }));
         }
         break;
       }

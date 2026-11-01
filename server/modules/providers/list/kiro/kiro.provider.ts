@@ -1,3 +1,4 @@
+import { KiroForkProvider } from '@/modules/providers/list/kiro/kiro-fork.provider.js';
 import { KiroProviderAuth } from '@/modules/providers/list/kiro/kiro-auth.provider.js';
 import { KiroProviderModels } from '@/modules/providers/list/kiro/kiro-models.provider.js';
 import { kiroRuntime } from '@/modules/providers/list/kiro/kiro-runtime.provider.js';
@@ -8,6 +9,7 @@ import { KiroSkillsProvider } from '@/modules/providers/list/kiro/kiro-skills.pr
 import { AbstractProvider } from '@/modules/providers/shared/base/abstract.provider.js';
 import type {
   IProviderAuth,
+  IProviderFork,
   IProviderMcp,
   IProviderModels,
   IProviderRuntime,
@@ -17,9 +19,8 @@ import type {
 } from '@/shared/interfaces.js';
 
 /**
- * Kiro provider wrapper. Auth and the API-key store are real (T3); runtime,
- * models, mcp, skills, sessions, and sessionSynchronizer are safe stubs so
- * the registry type-checks until their tasks (T4-T6) replace them.
+ * Kiro provider wrapper. Chat, models, sessions, MCP, skills, auth and forking are
+ * all real; see docs/kiro for the design.
  */
 export class KiroProvider extends AbstractProvider {
   readonly runtime: IProviderRuntime = kiroRuntime;
@@ -29,6 +30,7 @@ export class KiroProvider extends AbstractProvider {
   readonly skills: IProviderSkills = new KiroSkillsProvider();
   readonly sessions: IProviderSessions = new KiroSessionsProvider();
   readonly sessionSynchronizer: IProviderSessionSynchronizer = new KiroSessionSynchronizer();
+  readonly fork: IProviderFork = new KiroForkProvider();
 
   constructor() {
     super('kiro');
