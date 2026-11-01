@@ -1,5 +1,4 @@
 import { memo } from 'react';
-import { ActivityIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 type TokenUsageSummaryProps = {
@@ -40,6 +39,39 @@ const readUsageNumber = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const RING_RADIUS = 9;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
+
+/** Ring color steps up as the context window fills. */
+const ringColorClass = (percent: number) => {
+  if (percent >= 90) return 'text-red-500';
+  if (percent >= 70) return 'text-amber-500';
+  return 'text-primary';
+};
+
+/** Circular gauge showing how much of the context window is used. */
+function ContextRing({ percent }: { percent: number }) {
+  const clamped = Math.min(100, Math.max(0, percent));
+  const dash = (clamped / 100) * RING_CIRCUMFERENCE;
+  return (
+    <span className="relative grid h-6 w-6 place-items-center" data-testid="context-ring" data-percent={clamped.toFixed(1)}>
+      <svg viewBox="0 0 24 24" className="h-6 w-6 -rotate-90" aria-hidden="true">
+        <circle cx="12" cy="12" r={RING_RADIUS} fill="none" strokeWidth="2.5" className="stroke-muted-foreground/20" />
+        <circle
+          cx="12"
+          cy="12"
+          r={RING_RADIUS}
+          fill="none"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeDasharray={`${dash} ${RING_CIRCUMFERENCE}`}
+          className={`stroke-current ${ringColorClass(clamped)}`}
+        />
+      </svg>
+      <span className="absolute text-[8px] font-semibold leading-none text-foreground">{Math.round(clamped)}</span>
+    </span>
+  );
+}
 /**
  * Rendered by chat's ChatComposer to show the session's context-window usage
  * and open the detailed token breakdown on click.
@@ -55,7 +87,9 @@ function TokenUsageSummary({ usage, onClick }: TokenUsageSummaryProps) {
   const usedTokens = readUsageNumber(usage?.used) || inputTokens + outputTokens;
   // Kiro meters credits, not tokens (`unit: 'credit'`), and reports the context window as a percentage.
   const isCredits = usage?.unit === 'credit';
+  const totalTokens = readUsageNumber(usage?.total);
   const contextPercentage = readUsageNumber(usage?.contextPercentage);
+  const ringPercent = contextPercentage > 0 ? contextPercentage : totalTokens > 0 ? (usedTokens / totalTokens) * 100 : 0;
   const formattedUsed = isCredits ? formatCredits(usedTokens) : formatTokenCount(usedTokens);
   const title = isCredits
     ? [
@@ -71,9 +105,7 @@ function TokenUsageSummary({ usage, onClick }: TokenUsageSummaryProps) {
       title={title}
       aria-label={t('chat:misc.showTokenUsage')}
     >
-      <span className="grid h-5 w-5 place-items-center rounded-md bg-primary/10 text-primary">
-        <ActivityIcon className="h-3.5 w-3.5" />
-      </span>
+      <ContextRing percent={ringPercent} />
       <span className="font-medium text-foreground">{formattedUsed}</span>
       <span className="hidden text-muted-foreground/70 sm:inline">
         {isCredits ? t('chat:misc.creditsLabel') : t('chat:misc.tokensLabel', { count: usedTokens })}
