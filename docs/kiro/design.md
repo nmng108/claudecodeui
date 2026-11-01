@@ -14,7 +14,12 @@ Reference implementation for ACP behavior: the kiro-ui repo (`server.ts`, `src/s
 - `session/prompt` takes `{ sessionId, prompt: [{ type: "text", text }] }`. The turn ends with its response (`stopReason`).
 - `session/cancel` is a notification.
 - `session/request_permission` is a request; answer with `{ outcome: { outcome: "selected", optionId } }` or `{ outcome: { outcome: "cancelled" } }`.
-- Kiro extensions arrive as `_kiro.dev/*` notifications (`metadata`, `commands/available`, `session/list_update`, ...).
+- Kiro extensions arrive as `_kiro.dev/*` notifications (`metadata`, `commands/available`, `session/list_update`, ...). The client forwards those three and ignores any other `_kiro.dev/*` method.
+
+## KIRO_CLI_PATH
+`KiroAcpClient` spawns `kiro-cli acp` through `cross-spawn` (so `.cmd` shims work on Windows) with the project path as `cwd`. Set the `KIRO_CLI_PATH` environment variable to run a specific binary instead of the `kiro-cli` found on `PATH`, for example a non-PATH install or the fake ACP agent used in tests. The value is the executable only; the client always appends the `acp` argument. A missing binary fails with `KIRO_CLI_NOT_FOUND`. `KIRO_ACP_INIT_TIMEOUT_MS` (default 20000) bounds the `initialize` handshake.
+
+`KIRO_API_KEY` is set only in the child's environment (copied from `process.env` plus the resolved key). It is never written to `process.env`, logged, or emitted.
 
 ## Components (under `server/modules/providers/list/kiro/`)
 

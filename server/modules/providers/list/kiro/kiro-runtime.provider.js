@@ -1,22 +1,385 @@
-// @ts-nocheck -- stub runtime; typed implementation lands with the ACP client (T4).
-import { AppError } from '@/shared/utils.js';
+// @ts-nocheck -- normalized event payloads mirror the other JS runtimes (cursor/opencode); typed at the ACP client boundary instead.
+import {
+  appendFilesInputTag,
+  appendImagesInputTag,
+} from '@/shared/image-attachments.js';
+import { notifyRunFailed, notifyRunStopped } from '@/modules/notifications/index.js';
+import { createCompleteMessage, createNormalizedMessage, generateMessageId } from '@/shared/utils.js';
+import { resolveKiroApiKey } from '@/modules/providers/list/kiro/kiro-api-key.store.js';
+import { KiroAcpClient } from '@/modules/providers/list/kiro/kiro-acp.client.js';
+
+/** Live ACP clients keyed by the app session id (falling back to the ACP session id for legacy/direct callers). */
+const activeKiroSessions = new Map();
+// Pending UI permission decisions, keyed by ACP requestId (the tool call id),
+// mirroring the Claude runtime's module-level map so chat-websocket's generic
+// `resolveToolApproval` dispatch (which tries every provider) can reach this
+// runtime without it being the active one for that request.
+const pendingKiroApprovals = new Map();
+
+const KIRO_INIT_TIMEOUT_MS = parseInt(process.env.KIRO_ACP_INIT_TIMEOUT_MS ?? '', 10) || 20000;
 
 /**
- * Stand-in for the Kiro ACP runtime until `KiroAcpClient` lands (T4).
- *
- * Every call fails clearly instead of silently doing nothing, so a chat send
- * routed to `kiro` before the real runtime exists reports an understandable
- * error rather than hanging or crashing.
+ * Builds the single ACP text prompt for a turn: the user's text plus the
+ * same `<images_input>` / `<files_input>` tags the Cursor/OpenCode runtimes
+ * use for provider-neutral attachment references (kiro-cli has no documented
+ * native image/resource ingestion yet, so this keeps attachments visible to
+ * the model without depending on ACP `image`/`resource` content blocks this
+ * task has not verified kiro-cli accepts).
  */
-export const kiroRuntime = {
-  async run(_command, _options, _writer, _context) {
-    throw new AppError('The Kiro provider runtime is not implemented yet.', {
-      code: 'KIRO_RUNTIME_NOT_IMPLEMENTED',
-      statusCode: 501,
-    });
-  },
+function buildKiroPromptText(command, images, files) {
+  return appendFilesInputTag(appendImagesInputTag(command || '', images), files);
+}
 
-  abort(_sessionId) {
+function sessionMapKey(sessionId, acpSessionId) {
+  return sessionId || acpSessionId || null;
+}
+
+/**
+ * Runs one Kiro ACP turn: connects (or resumes), sends the prompt, streams
+ * normalized events to `ws`, and resolves once the turn's stop reason comes
+ * back. Mirrors the run/abort/permissions contract of the Claude/Codex/Cursor
+ * runtimes so `providerRuntimeService` can dispatch to it the same way.
+ */
+async function runKiro(command, options = {}, ws, context) {
+  const {
+    sessionId,
+    cwd,
+    projectPath,
+    images,
+    files,
+    sessionSummary,
+    permissionMode,
+  } = options;
+
+  const workingDirectory = cwd || projectPath || process.cwd();
+  const providerSessionId = context.resolveProviderSessionId(sessionId);
+  // Agent-API runs (agent.routes.ts) pass 'bypassPermissions' the same way
+  // Claude/Codex/OpenCode do for unattended runs: there is no UI tab waiting
+  // to answer a `session/request_permission` call, so it is auto-approved
+  // with the first allow option ACP offered instead of hanging the turn.
+  const autoApprove = permissionMode === 'bypassPermissions';
+
+  let client = null;
+  let capturedSessionId = providerSessionId || null;
+  let sessionCreatedSent = false;
+  let completeSent = false;
+  let aborted = false;
+
+  const mapKey = () => sessionMapKey(sessionId, capturedSessionId);
+
+  const registerActive = () => {
+    const key = mapKey();
+    if (key) {
+      activeKiroSessions.set(key, { client, status: 'running' });
+    }
+  };
+
+  const sendComplete = (exitCode, extra = {}) => {
+    if (completeSent) {
+      return;
+    }
+    completeSent = true;
+    ws.send(createCompleteMessage({
+      provider: 'kiro',
+      sessionId: sessionId || capturedSessionId || null,
+      actualSessionId: capturedSessionId || sessionId || null,
+      exitCode,
+      ...extra,
+    }));
+  };
+
+  try {
+    client = new KiroAcpClient({
+      cwd: workingDirectory,
+      apiKey: await resolveKiroApiKey(),
+      initTimeoutMs: KIRO_INIT_TIMEOUT_MS,
+      events: {
+        onSessionUpdate: (event) => {
+          const activeSessionId = capturedSessionId || sessionId || null;
+          switch (event.type) {
+            case 'agent_message_chunk':
+              if (event.isThought) {
+                ws.send(createNormalizedMessage({ kind: 'thinking', content: event.text, sessionId: activeSessionId, provider: 'kiro' }));
+              } else {
+                ws.send(createNormalizedMessage({ kind: 'stream_delta', content: event.text, sessionId: activeSessionId, provider: 'kiro' }));
+              }
+              break;
+            case 'agent_thought_chunk':
+              ws.send(createNormalizedMessage({ kind: 'thinking', content: event.text, sessionId: activeSessionId, provider: 'kiro' }));
+              break;
+            case 'tool_call':
+              ws.send(createNormalizedMessage({
+                kind: 'tool_use',
+                toolId: event.toolCallId,
+                toolName: event.title,
+                toolInput: event.rawInput,
+                content: event.content,
+                status: event.status,
+                sessionId: activeSessionId,
+                provider: 'kiro',
+              }));
+              break;
+            case 'tool_call_update':
+              ws.send(createNormalizedMessage({
+                kind: 'tool_result',
+                toolId: event.toolCallId,
+                toolResult: { content: typeof event.rawOutput === 'string' ? event.rawOutput : JSON.stringify(event.rawOutput ?? '') },
+                status: event.status,
+                content: event.content,
+                sessionId: activeSessionId,
+                provider: 'kiro',
+              }));
+              break;
+            case 'plan':
+              // No dedicated normalized "plan" message kind exists yet app-wide;
+              // riding on `status` (like Codex/Claude's `token_budget`) keeps this
+              // forward-compatible without adding a MessageKind this task doesn't own.
+              ws.send(createNormalizedMessage({ kind: 'status', text: 'plan', entries: event.entries, sessionId: activeSessionId, provider: 'kiro' }));
+              break;
+            case 'tool_call_chunk':
+              ws.send(createNormalizedMessage({
+                kind: 'tool_use',
+                toolId: event.toolCallId || generateMessageId('kiro_chunk'),
+                toolName: event.title,
+                content: event.content,
+                sessionId: activeSessionId,
+                provider: 'kiro',
+              }));
+              break;
+            case 'retry_warning':
+              ws.send(createNormalizedMessage({ kind: 'status', text: 'retry_warning', reason: event.message, sessionId: activeSessionId, provider: 'kiro' }));
+              break;
+            case 'unknown':
+            default:
+              // Unrecognized session update kinds are dropped rather than guessed at.
+              break;
+          }
+        },
+        onExtNotification: (event) => {
+          const activeSessionId = capturedSessionId || sessionId || null;
+          // `_kiro.dev/metadata`, `commands/available`, and `session/list_update`
+          // are forwarded as `status` events carrying the raw payload; every
+          // other `_kiro.dev/*` notification is intentionally ignored here —
+          // T5/T6 own interpreting the rest (agent switches, MCP, compaction).
+          if (
+            event.method === '_kiro.dev/metadata'
+            || event.method === '_kiro.dev/commands/available'
+            || event.method === '_kiro.dev/session/list_update'
+          ) {
+            ws.send(createNormalizedMessage({
+              kind: 'status',
+              text: event.method,
+              sessionId: activeSessionId,
+              provider: 'kiro',
+              ...event.params,
+            }));
+          }
+        },
+        onPermissionRequest: async (event) => {
+          const activeSessionId = capturedSessionId || sessionId || null;
+
+          if (autoApprove) {
+            const allowOption = event.options.find((option) => option.kind === 'allow_once' || option.kind === 'allow_always');
+            return allowOption ? { optionId: allowOption.optionId } : { cancelled: true };
+          }
+
+          ws.send(createNormalizedMessage({
+            kind: 'permission_request',
+            requestId: event.requestId,
+            toolName: event.title,
+            input: event.rawInput,
+            sessionId: activeSessionId,
+            provider: 'kiro',
+          }));
+
+          return new Promise((resolve) => {
+            // Metadata mirrors the Claude runtime's resolver shape so the
+            // generic `getPendingApprovalsForSession` surface looks the same
+            // across providers (chat-websocket reads these fields loosely).
+            const resolver = (decision) => {
+              pendingKiroApprovals.delete(event.requestId);
+              ws.send(createNormalizedMessage({ kind: 'permission_resolved', requestId: event.requestId, sessionId: activeSessionId, provider: 'kiro' }));
+              if (!decision || decision.cancelled) {
+                resolve({ cancelled: true });
+                return;
+              }
+              if (decision.allow === false) {
+                const rejectOption = event.options.find((option) => option.kind === 'reject_once' || option.kind === 'reject_always');
+                resolve(rejectOption ? { optionId: rejectOption.optionId } : { cancelled: true });
+                return;
+              }
+              const optionId = typeof decision.optionId === 'string'
+                ? decision.optionId
+                : event.options.find((option) => option.kind === 'allow_once' || option.kind === 'allow_always')?.optionId;
+              if (!optionId) {
+                resolve({ cancelled: true });
+                return;
+              }
+              resolve({ optionId });
+            };
+            resolver._sessionId = activeSessionId;
+            resolver._toolName = event.title;
+            resolver._input = event.rawInput;
+            resolver._receivedAt = new Date();
+            resolver._options = event.options;
+            pendingKiroApprovals.set(event.requestId, resolver);
+          });
+        },
+        onCrash: ({ code, signal, stderrTail }) => {
+          if (aborted) {
+            return;
+          }
+          const activeSessionId = capturedSessionId || sessionId || null;
+          // stderrTail is the CLI's own diagnostic output; the API key is
+          // injected only into the child's env and kiro-cli has never been
+          // observed to echo it, but this message never includes the key or
+          // the env object regardless of what the tail contains.
+          const detail = stderrTail && stderrTail.trim() ? ` (${stderrTail.trim().slice(-500)})` : '';
+          ws.send(createNormalizedMessage({
+            kind: 'error',
+            content: `Kiro CLI exited unexpectedly (code ${code ?? 'null'}${signal ? `, signal ${signal}` : ''})${detail}`,
+            sessionId: activeSessionId,
+            provider: 'kiro',
+          }));
+        },
+      },
+    });
+
+    const { initializeResponse } = await client.connect();
+    registerActive();
+
+    let sessionResult;
+    if (providerSessionId) {
+      sessionResult = await client.resumeSession(providerSessionId);
+    } else {
+      sessionResult = await client.startSession();
+    }
+    capturedSessionId = sessionResult.sessionId;
+    registerActive();
+
+    if (ws.setSessionId && typeof ws.setSessionId === 'function') {
+      ws.setSessionId(capturedSessionId);
+    }
+
+    if (!providerSessionId && !sessionCreatedSent) {
+      sessionCreatedSent = true;
+      ws.send(createNormalizedMessage({
+        kind: 'session_created',
+        newSessionId: capturedSessionId,
+        sessionId: capturedSessionId,
+        provider: 'kiro',
+        // Exposed for T5 (models/agents) rather than consumed here: the
+        // `session/new` response's Kiro-specific `models`/`modes` fields.
+        modes: sessionResult.raw?.modes ?? null,
+        models: sessionResult.raw?.models ?? null,
+      }));
+    }
+
+    const promptText = buildKiroPromptText(command, images, files);
+    const { stopReason } = await client.prompt(promptText);
+
+    ws.send(createNormalizedMessage({ kind: 'status', text: 'stop_reason', stopReason, sessionId: capturedSessionId || sessionId || null, provider: 'kiro' }));
+
+    const session = activeKiroSessions.get(mapKey());
+    aborted = session?.status === 'aborted';
+
+    if (!aborted) {
+      sendComplete(0);
+      notifyRunStopped({
+        userId: ws?.userId || null,
+        provider: 'kiro',
+        sessionId: sessionId || capturedSessionId || null,
+        sessionName: sessionSummary,
+        stopReason: stopReason || 'completed',
+      });
+    }
+
+    void initializeResponse; // available for future capability checks (T5/T6)
+  } catch (error) {
+    const session = activeKiroSessions.get(mapKey());
+    const wasAborted = aborted || session?.status === 'aborted';
+
+    if (!wasAborted) {
+      console.error('[Kiro] Error:', error);
+      const activeSessionId = capturedSessionId || sessionId || null;
+      const installed = await context.isProviderInstalled();
+      const errorContent = !installed
+        ? 'Kiro CLI is not installed. Install it and ensure `kiro-cli` is on PATH.'
+        : (error && error.message) || 'Kiro CLI run failed.';
+      ws.send(createNormalizedMessage({ kind: 'error', content: errorContent, sessionId: activeSessionId, provider: 'kiro' }));
+      sendComplete(1);
+      notifyRunFailed({
+        userId: ws?.userId || null,
+        provider: 'kiro',
+        sessionId: sessionId || capturedSessionId || null,
+        sessionName: sessionSummary,
+        error,
+      });
+    }
+  } finally {
+    const key = mapKey();
+    if (key) {
+      activeKiroSessions.delete(key);
+    }
+    if (client) {
+      await client.close();
+    }
+  }
+}
+
+/**
+ * Aborts an active Kiro session: sends `session/cancel`, which resolves any
+ * outstanding permission request as cancelled and makes the in-flight
+ * `prompt()` return with `stopReason: 'cancelled'`.
+ */
+function abortKiroSession(sessionId) {
+  const session = activeKiroSessions.get(sessionId);
+  if (!session) {
     return false;
+  }
+  session.status = 'aborted';
+  const acpSessionId = session.client.getSessionId();
+  for (const [requestId, resolver] of [...pendingKiroApprovals]) {
+    if (resolver._sessionId === sessionId || resolver._sessionId === acpSessionId) {
+      resolver({ cancelled: true });
+      pendingKiroApprovals.delete(requestId);
+    }
+  }
+  session.client.cancel().catch(() => {});
+  return true;
+}
+
+/** Resolves a pending Kiro permission request by the UI's decision (allow/deny). Used by the shared `chat.permission-response` dispatch. */
+function resolveKiroPermission(requestId, decision) {
+  const resolver = pendingKiroApprovals.get(requestId);
+  if (resolver) {
+    resolver(decision);
+  }
+}
+
+/** Pending permission prompts for one session, in the same loosely-typed shape the Claude runtime exposes. */
+function getPendingKiroApprovalsForSession(sessionId) {
+  const pending = [];
+  for (const [requestId, resolver] of pendingKiroApprovals) {
+    if (resolver._sessionId === sessionId) {
+      pending.push({
+        requestId,
+        toolName: resolver._toolName,
+        input: resolver._input,
+        receivedAt: resolver._receivedAt,
+      });
+    }
+  }
+  return pending;
+}
+
+export const kiroRuntime = {
+  run: runKiro,
+  abort: abortKiroSession,
+  permissions: {
+    resolve: resolveKiroPermission,
+    listPending: getPendingKiroApprovalsForSession,
   },
 };
+
+export { runKiro, abortKiroSession, resolveKiroPermission, getPendingKiroApprovalsForSession };

@@ -7,11 +7,11 @@ Legend: `[x]` done and committed, `[~]` code written but uncommitted/unverified,
 - [x] **T1** Branch `feature/kiro`, docs in `docs/kiro/`. (commit f1f5d8f3)
 - [x] **T2** Rename package to `@namng108/cloudcli` 1.38.0, update all references, `npm pack --dry-run`. (commit 91c863c4)
 - [x] **T3** Kiro provider id, registry, auth, API-key store, save/clear routes, tests.
-- [ ] **T4** `KiroAcpClient` and runtime (stream, permissions, cancel, crash), fake ACP agent tests.
+- [x] **T4** `KiroAcpClient` and runtime (stream, permissions, cancel, crash), fake ACP agent tests.
 - [ ] **T5** Models/agents, sessions history, synchronizer, tests.
 - [ ] **T6** MCP, skills, token usage, fork/rewind capability, tests.
-- [x] **T7** Frontend: picker, login modal with API key, MCP constants, settings, api-docs, tests.
-- [~] **T8** `docker/standard/Dockerfile`, `docker-compose.yml`, docs.
+- [x] **T7** Frontend: picker, login modal with API key, MCP constants, settings, api-docs, tests. (commit c36378c4)
+- [x] **T8** `docker/standard/Dockerfile`, `docker-compose.yml`, docs.
 - [ ] **T9** Verify (typecheck, lint, test, test:client, build), publish, Docker check, push.
 
 Each task ends with a conventional-commit commit.
@@ -158,3 +158,13 @@ A parallel run of T3 and T8 was interrupted. Its output is in the working tree, 
   `Exclude<SkillsProvider, 'opencode' | 'kiro'>` in `ProviderSkills.tsx` and
   from the `selectedAgent !== 'kiro'` guard in
   `AgentCategoryContentSection.tsx`.
+
+### T4 notes (ACP facts learned, verified against real kiro-cli 2.37.0)
+- `@agentclientprotocol/sdk` ^1.9.0 (`ClientSideConnection` + `ndJsonStream`) is a dependency. `npm install` also pruned unrelated extraneous entries from `package-lock.json`.
+- `initialize` returns `agentCapabilities`: `loadSession: true`, `promptCapabilities {image: true, audio: false, embeddedContext: false}`, `mcpCapabilities {http: true, sse: false}`, `sessionCapabilities: {}`, `authMethods: []`, `agentInfo {name: "Kiro CLI Agent", version: "2.37.0"}`.
+- `sessionCapabilities` is empty, so standard ACP `session/list`, `session/fork` and `session/resume` are NOT advertised. Session listing goes through the Kiro extension `_kiro.dev/session/list {cwd}`; resuming uses `session/load` (supported). Fork and rewind have no advertised support: T6 should report them unsupported unless a `_kiro.dev/*` command proves otherwise.
+- `session/new` returns `sessionId`, `modes` (agents such as `kiro_default`, `kiro_planner`, `kiro_guide`, each with `_meta.welcomeMessage`) and `models` (`currentModelId`, `availableModels`; default `claude-sonnet-5` with an `auto` entry). The client exposes this raw response (and the `initialize` response) for T5/T6.
+- Image prompts are advertised (`image: true`), but the runtime still sends attachments as `<images_input>`/`<files_input>` tags; native image content blocks are a possible follow-up.
+- `kiro-cli` needs `KIRO_API_KEY` only in the child env. The runtime auto-approves permission requests under `bypassPermissions` (Agent API) and otherwise bridges them to the UI through the shared `chat.permission-response` path (deny selects the `reject_*` option).
+- Abort sends `session/cancel`; the abort handler owns the aborted `complete`. Unknown `_kiro.dev/*` notifications are ignored; `metadata`, `commands/available` and `session/list_update` are forwarded as `status` events.
+- Windows: `cross-spawn` replaces the child's `exit` with an `error` event for ENOENT, and the stream closes first; the client waits briefly and reports `KIRO_CLI_NOT_FOUND`.
