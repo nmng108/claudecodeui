@@ -346,6 +346,35 @@ test('custom models without declared effort levels expose no effort', async () =
   assert.equal('effort' in created.model, false);
 });
 
+test('custom Kiro models can declare reasoning levels, and only levels Kiro supports', async () => {
+  const { service } = createTestService();
+
+  const created = await service.createCustomModel('kiro', {
+    model: 'My Kiro Model',
+    id: 'my-kiro-model',
+    effort: { values: ['low', 'high', 'max'], default: 'high' },
+  });
+  assert.deepEqual(created.model.effort, {
+    default: 'high',
+    values: [{ value: 'low' }, { value: 'high' }, { value: 'max' }],
+  });
+
+  const catalog = await service.getProviderModels('kiro');
+  assert.deepEqual(catalog.EFFORT_LEVELS, ['low', 'medium', 'high', 'xhigh', 'max']);
+  assert.ok(catalog.OPTIONS.find((option) => option.value === 'my-kiro-model')?.effort);
+
+  await assert.rejects(
+    () => service.createCustomModel('kiro', {
+      model: 'Bad level',
+      id: 'bad-level',
+      effort: { values: ['low', 'ultra'] },
+    }),
+    (error) => error instanceof AppError
+      && error.code === 'INVALID_MODEL_EFFORT'
+      && error.statusCode === 400,
+  );
+});
+
 test('custom effort levels must be levels the provider supports', async () => {
   const { service } = createTestService();
 
@@ -392,7 +421,7 @@ test('allowed effort levels come from the provider, not from the built-in models
     codex: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
     cursor: [],
     opencode: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'thinking'],
-    kiro: [],
+    kiro: ['low', 'medium', 'high', 'xhigh', 'max'],
   };
   for (const [provider, levels] of Object.entries(expectedLevels) as Array<[LLMProvider, string[]]>) {
     assert.deepEqual((await service.getProviderModels(provider)).EFFORT_LEVELS, levels, provider);

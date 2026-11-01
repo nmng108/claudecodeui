@@ -22,9 +22,9 @@ const FALLBACK_PROVIDER_EFFORT_VALUES: Partial<Record<LLMProvider, readonly stri
   // valid Max/Ultra selection from being reset during catalog hydration.
   codex: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
   opencode: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
-  // Kiro's effort support is not yet known (runtime lands in T4); no fallback
-  // values are listed, so getSupportsEffortForProvider reports false until the
-  // backend's own model catalog says otherwise.
+  // Superset used only before the model catalog loads; the backend's own
+  // levels for Kiro narrow it per model once the catalog is available.
+  kiro: ['low', 'medium', 'high', 'xhigh', 'max'],
 };
 
 const toProviderEffortOptions = (
@@ -36,10 +36,10 @@ const FALLBACK_DEFAULT_MODEL: Record<LLMProvider, string> = {
   cursor: 'gpt-5.3-codex',
   codex: 'gpt-5.4',
   opencode: 'anthropic/claude-sonnet-4-5',
-  // Kiro's models/agents come from the ACP `session/new` response (T5); until
-  // the backend's own catalog lands, this fallback just needs to be distinct
-  // from every other provider's so default-model bookkeeping stays per-provider.
-  kiro: 'kiro-default',
+  // Used until the backend's own Kiro catalog (read from the ACP `session/new`
+  // response) loads; it must stay distinct from every other provider's default
+  // so default-model bookkeeping stays per-provider.
+  kiro: 'auto',
 };
 
 const PROVIDERS: LLMProvider[] = ['claude', 'cursor', 'codex', 'opencode', 'kiro'];

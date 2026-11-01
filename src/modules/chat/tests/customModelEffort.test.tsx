@@ -68,6 +68,16 @@ const CATALOG: Partial<Record<LLMProvider, ProviderModelsDefinition>> = {
     DEFAULT: 'opencode/gpt-5.5',
     EFFORT_LEVELS: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'thinking'],
   },
+  // Kiro lists the models its CLI advertises; none declares effort, but the
+  // provider supports it, so custom models can declare levels.
+  kiro: {
+    OPTIONS: [
+      { value: 'auto', label: 'Auto', isCustom: false },
+      { value: 'claude-sonnet-5.5', label: 'Claude Sonnet 5.5', isCustom: false },
+    ],
+    DEFAULT: 'auto',
+    EFFORT_LEVELS: ['low', 'medium', 'high', 'xhigh', 'max'],
+  },
 };
 
 const okJson = (data: unknown) => Promise.resolve({
@@ -178,6 +188,25 @@ test('OpenCode offers its effort levels even when no visible built-in model decl
 
   await waitFor(() => assert.equal(created.length, 1));
   assert.deepEqual(created[0]?.input.effort, { values: ['none', 'high'] });
+});
+
+test('Kiro lists its built-in models and offers reasoning levels for a new custom model', async () => {
+  const { actions, created } = createActions();
+  render(<ModelLibraryPanel initialProvider="kiro" providerModelCatalog={CATALOG} actions={actions} />);
+
+  screen.getByText('Claude Sonnet 5.5');
+  screen.getByText('Reasoning levels');
+  fireEvent.change(screen.getByLabelText('Model name'), { target: { value: 'Kiro Custom' } });
+  fireEvent.change(screen.getByLabelText('Model ID'), { target: { value: 'kiro-custom' } });
+  fireEvent.click(screen.getByRole('button', { name: 'max' }));
+  fireEvent.click(screen.getByRole('button', { name: 'medium' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Add model' }));
+
+  await waitFor(() => assert.equal(created.length, 1));
+  assert.deepEqual(created[0], {
+    provider: 'kiro',
+    input: { model: 'Kiro Custom', id: 'kiro-custom', effort: { values: ['medium', 'max'] } },
+  });
 });
 
 test('providers without effort support show no effort levels and send none', async () => {

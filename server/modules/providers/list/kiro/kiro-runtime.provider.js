@@ -7,6 +7,7 @@ import { notifyRunFailed, notifyRunStopped } from '@/modules/notifications/index
 import { createCompleteMessage, createNormalizedMessage, generateMessageId } from '@/shared/utils.js';
 import { resolveKiroApiKey } from '@/modules/providers/list/kiro/kiro-api-key.store.js';
 import { KiroAcpClient } from '@/modules/providers/list/kiro/kiro-acp.client.js';
+import { seedKiroModelCatalog } from '@/modules/providers/list/kiro/kiro-models.provider.js';
 
 /** Live ACP clients keyed by the app session id (falling back to the ACP session id for legacy/direct callers). */
 const activeKiroSessions = new Map();
@@ -35,6 +36,20 @@ function sessionMapKey(sessionId, acpSessionId) {
 }
 
 /**
+ * Returns the reasoning level to apply, or `undefined` when none should be
+ * sent. A level is only used when the selected model declares it, matching the
+ * other runtimes; `default` and unknown levels leave Kiro's own setting alone.
+ * Exported for tests.
+ */
+export function resolveKiroEffort(modelId, effort, catalog) {
+  const selectedModel = catalog?.OPTIONS?.find((option) => option.value === modelId);
+  const allowedEfforts = selectedModel?.effort?.values?.map((value) => value.value) || [];
+  return typeof effort === 'string' && effort !== 'default' && allowedEfforts.includes(effort)
+    ? effort
+    : undefined;
+}
+
+/**
  * Runs one Kiro ACP turn: connects (or resumes), sends the prompt, streams
  * normalized events to `ws`, and resolves once the turn's stop reason comes
  * back. Mirrors the run/abort/permissions contract of the Claude/Codex/Cursor
@@ -49,6 +64,8 @@ async function runKiro(command, options = {}, ws, context) {
     files,
     sessionSummary,
     permissionMode,
+    model,
+    effort,
   } = options;
 
   const workingDirectory = cwd || projectPath || process.cwd();
@@ -273,6 +290,44 @@ async function runKiro(command, options = {}, ws, context) {
         modes: sessionResult.raw?.modes ?? null,
         models: sessionResult.raw?.models ?? null,
       }));
+    }
+
+    // The same response lists the models Kiro offers; remember it so the model
+    // picker does not need its own `kiro-cli` process.
+    seedKiroModelCatalog(sessionResult.raw);
+
+    const currentModelId = sessionResult.raw?.models?.currentModelId;
+    const resolvedModel = await context.resolveResumeModel(sessionId, model);
+    if (resolvedModel && resolvedModel !== currentModelId) {
+      try {
+        await client.setModel(resolvedModel);
+      } catch {
+        // A model Kiro rejects should not block the turn; it runs on the
+        // session's current model and the user is told why.
+        ws.send(createNormalizedMessage({
+          kind: 'status',
+          text: 'model_switch_failed',
+          reason: `Kiro could not switch to "${resolvedModel}".`,
+          sessionId: capturedSessionId || sessionId || null,
+          provider: 'kiro',
+        }));
+      }
+    }
+
+    const catalog = await context.getProviderModels();
+    const resolvedEffort = resolveKiroEffort(resolvedModel || currentModelId, effort, catalog);
+    if (resolvedEffort) {
+      try {
+        await client.setEffort(resolvedEffort);
+      } catch {
+        ws.send(createNormalizedMessage({
+          kind: 'status',
+          text: 'effort_switch_failed',
+          reason: `Kiro could not apply reasoning level "${resolvedEffort}".`,
+          sessionId: capturedSessionId || sessionId || null,
+          provider: 'kiro',
+        }));
+      }
     }
 
     const promptText = buildKiroPromptText(command, images, files);

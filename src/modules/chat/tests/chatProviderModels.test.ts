@@ -82,7 +82,7 @@ test('kiro is included in provider selection, with its own default model and per
     assert.ok(result.current.providerModels.kiro);
   });
 
-  assert.equal(result.current.providerModels.kiro, 'kiro-default');
+  assert.equal(result.current.providerModels.kiro, 'auto');
   // Kiro's runtime (T4) is not landed yet, so only 'default' is a valid mode;
   // requesting anything else must fall back to it rather than error.
   assert.equal(result.current.resolvePermissionModeForProvider('kiro', 'default'), 'default');

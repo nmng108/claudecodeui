@@ -131,8 +131,12 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsAbort: false,
     supportsPermissionRequests: false,
     supportsTokenUsage: false,
-    supportsEffort: false,
-    effortLevels: [],
+    // Kiro applies the level with its `/effort <level>` command. The levels a
+    // model accepts depend on the model, so this is the ceiling that custom
+    // models may declare; the runtime only sends a level the selected model
+    // lists.
+    supportsEffort: true,
+    effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
     supportsMessageEditing: false,
     supportsSessionForking: false,
   },

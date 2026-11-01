@@ -319,3 +319,29 @@ test.after(() => {
   delete process.env.KIRO_FAKE_AGENT_SCENARIO;
   delete process.env.KIRO_FAKE_AGENT_KEY_SINK;
 });
+
+test('setModel is accepted and setEffort runs its own turn without reaching the chat', async () => {
+  await withTempDir(async (cwd) => {
+    const events: unknown[] = [];
+    const client = makeClient({
+      scenario: 'stream',
+      cwd,
+      events: { onSessionUpdate: (event) => events.push(event) },
+    });
+    try {
+      await client.connect();
+      await client.startSession();
+
+      await client.setModel('fake-model');
+      await client.setEffort('high');
+      assert.equal(events.length, 0, 'the /effort turn is muted');
+
+      await client.prompt('hello');
+      assert.ok(events.length > 0, 'updates flow again after the effort turn');
+
+      await assert.rejects(() => client.setEffort('high; rm -rf'), /Invalid Kiro effort level/);
+    } finally {
+      await client.close();
+    }
+  });
+});

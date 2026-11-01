@@ -205,6 +205,8 @@ export class KiroAcpClient {
   private stderrTail = '';
   private closed = false;
   private crashNotified = false;
+  /** While true, session updates are dropped (used for the internal `/effort` turn). */
+  private muted = false;
   private spawnFailure: AppError | null = null;
   private readonly pendingPermissions = new Map<
     string,
@@ -292,12 +294,15 @@ export class KiroAcpClient {
     const connection = new ClientSideConnection((_agent) => ({
       requestPermission: (params) => this.handlePermissionRequest(params),
       sessionUpdate: async (params) => {
+        if (this.muted) {
+          return;
+        }
         const update = params.update as Record<string, unknown>;
         this.events.onSessionUpdate?.(toSessionUpdateEvent(update));
       },
       extNotification: async (method, params) => {
         // Unknown extension notifications are ignored.
-        if (!KNOWN_EXT_NOTIFICATIONS.has(method)) {
+        if (this.muted || !KNOWN_EXT_NOTIFICATIONS.has(method)) {
           return;
         }
         this.events.onExtNotification?.({ method, params: params as Record<string, unknown> });
@@ -358,6 +363,34 @@ export class KiroAcpClient {
     const raw = result as unknown as Record<string, unknown>;
     this.sessionId = providerSessionId;
     return { sessionId: providerSessionId, raw };
+  }
+
+  /**
+   * Switches the session's model. Kiro takes the ACP `session/set_model`
+   * request, which the current SDK no longer wraps, so it goes out as a raw
+   * extension request.
+   */
+  async setModel(modelId: string): Promise<void> {
+    const connection = this.requireConnection();
+    const sessionId = this.requireSessionId();
+    await connection.extMethod('session/set_model', { sessionId, modelId });
+  }
+
+  /**
+   * Sets the reasoning level with Kiro's `/effort <level>` command, the same
+   * way kiro-ui does. The command runs as a prompt turn, so its output is muted
+   * and never reaches the chat.
+   */
+  async setEffort(level: string): Promise<void> {
+    if (!/^[a-z]{1,20}$/.test(level)) {
+      throw new AppError('Invalid Kiro effort level.', { code: 'KIRO_INVALID_EFFORT', statusCode: 400 });
+    }
+    this.muted = true;
+    try {
+      await this.prompt(`/effort ${level}`);
+    } finally {
+      this.muted = false;
+    }
   }
 
   /** Sends one prompt turn and resolves with its stop reason once the agent finishes (or is cancelled). */
