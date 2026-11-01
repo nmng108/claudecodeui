@@ -32,11 +32,14 @@
  * - default (`stream`) when unset.
  */
 import { Readable, Writable } from 'node:stream';
-import { writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import os from 'node:os';
+import path from 'node:path';
 
 import { AgentSideConnection, ndJsonStream, PROTOCOL_VERSION } from '@agentclientprotocol/sdk';
 
-const scenario = process.env.KIRO_FAKE_AGENT_SCENARIO || 'stream';
+const defaultScenario = process.env.KIRO_FAKE_AGENT_SCENARIO || 'stream';
 /** The real CLI is launched with `--agent-engine=v3`; without it this fake behaves like the v2 server. */
 const isV3 = process.argv.includes('--agent-engine=v3');
 
@@ -82,6 +85,71 @@ const configOptions: Array<Record<string, any>> = [
 ];
 let forkCounter = 0;
 
+/**
+ * Browser end-to-end mode (`KIRO_FAKE_AGENT_HOME_SESSIONS=1`): every session gets a
+ * unique id and is written under `~/.kiro/sessions/<cwd hash>/<id>/` the way the
+ * real CLI does, so the app's sidebar, history and delete paths see real files.
+ * A prompt can pick its own scenario with a `[scenario:<name>]` marker.
+ */
+const writeHomeSessions = process.env.KIRO_FAKE_AGENT_HOME_SESSIONS === '1';
+const sessionCwds = new Map<string, string>();
+
+function sessionDirFor(cwd: string, sessionId: string): string {
+  const hash = createHash('sha1').update(cwd.toLowerCase()).digest('hex').slice(0, 16);
+  return path.join(os.homedir(), '.kiro', 'sessions', hash, sessionId);
+}
+
+function createSessionOnDisk(sessionId: string, cwd: string): void {
+  if (!writeHomeSessions) return;
+  sessionCwds.set(sessionId, cwd);
+  const dir = sessionDirFor(cwd, sessionId);
+  mkdirSync(dir, { recursive: true });
+  const now = new Date().toISOString();
+  writeFileSync(path.join(dir, 'session.json'), JSON.stringify({
+    schemaVersion: '1.0.0',
+    id: sessionId,
+    title: 'New Session',
+    agentMode: 'vibe',
+    workspacePaths: [cwd],
+    rootPaths: [cwd],
+    createdAt: now,
+    lastModifiedAt: now,
+    modelId: 'fake-model',
+    status: 'idle',
+  }, null, 2));
+}
+
+function appendTranscript(sessionId: string, lines: Array<Record<string, unknown>>): void {
+  const cwd = sessionCwds.get(sessionId);
+  if (!writeHomeSessions || !cwd) return;
+  const dir = sessionDirFor(cwd, sessionId);
+  const stamp = new Date().toISOString();
+  appendFileSync(
+    path.join(dir, 'messages.jsonl'),
+    lines.map((payload) => JSON.stringify({ id: (payload.id as string) ?? randomUUID(), timestamp: stamp, payload })).join('\n') + '\n',
+  );
+}
+
+/** Copies a session up to and including the turn of `messageId` (all of it without one). */
+function forkOnDisk(sourceId: string, forkId: string, messageId: string | undefined): void {
+  const cwd = sessionCwds.get(sourceId);
+  if (!writeHomeSessions || !cwd) return;
+  const from = sessionDirFor(cwd, sourceId);
+  createSessionOnDisk(forkId, cwd);
+  const source = existsSync(path.join(from, 'messages.jsonl'))
+    ? readFileSync(path.join(from, 'messages.jsonl'), 'utf8').split('\n').filter(Boolean)
+    : [];
+  const kept: string[] = [];
+  let passedAnchor = false;
+  for (const line of source) {
+    const row = JSON.parse(line) as { id: string; payload: { type: string } };
+    if (passedAnchor && row.payload.type === 'user') break;
+    kept.push(line);
+    if (messageId && row.id === messageId) passedAnchor = true;
+  }
+  writeFileSync(path.join(sessionDirFor(cwd, forkId), 'messages.jsonl'), kept.join('\n') + (kept.length ? '\n' : ''));
+}
+
 let pendingCancel: (() => void) | null = null;
 let cancelled = false;
 
@@ -106,9 +174,11 @@ const connection = new AgentSideConnection((_client) => ({
     };
   },
 
-  newSession() {
+  newSession(params: { cwd: string }) {
+    const sessionId = writeHomeSessions ? `sess_${randomUUID()}` : 'fake-session-1';
+    createSessionOnDisk(sessionId, params.cwd);
     return {
-      sessionId: 'fake-session-1',
+      sessionId,
       modes: {
         currentModeId: 'default',
         availableModes: [{ id: 'default', name: 'Default' }],
@@ -133,13 +203,20 @@ const connection = new AgentSideConnection((_client) => ({
 
   unstable_forkSession(params: { sessionId: string; _meta?: { [key: string]: unknown } | null }) {
     forkCounter += 1;
+    const messageId = (params._meta?.kiro as { messageId?: string } | undefined)?.messageId;
+    const forkId = writeHomeSessions
+      ? `sess_${randomUUID()}`
+      : `fake-fork-${forkCounter}-of-${params.sessionId}-at-${messageId ?? 'end'}`;
+    forkOnDisk(params.sessionId, forkId, messageId);
     return {
-      sessionId: `fake-fork-${forkCounter}-of-${params.sessionId}-at-${(params._meta?.kiro as { messageId?: string } | undefined)?.messageId ?? 'end'}`,
+      sessionId: forkId,
       configOptions: configOptions as never,
     };
   },
 
-  loadSession() {
+  loadSession(params: { sessionId: string; cwd: string }) {
+    // A resumed session lives on disk already; remember where for later appends and forks.
+    if (writeHomeSessions) sessionCwds.set(params.sessionId, params.cwd);
     return {
       modes: { currentModeId: 'default', availableModes: [{ id: 'default', name: 'Default' }] },
       models: { currentModelId: 'fake-model', availableModels: [{ modelId: 'fake-model', name: 'Fake Model' }] },
@@ -150,8 +227,12 @@ const connection = new AgentSideConnection((_client) => ({
     return {};
   },
 
-  async prompt(params: { sessionId: string }) {
+  async prompt(params: { sessionId: string; prompt?: Array<{ type: string; text?: string }> }) {
     const sessionId = params.sessionId;
+    const promptText = params.prompt?.find((block) => block.type === 'text')?.text ?? '';
+    const scenario = /\[scenario:([\w-]+)\]/.exec(promptText)?.[1] ?? defaultScenario;
+    const userLineId = randomUUID();
+    appendTranscript(sessionId, [{ id: userLineId, type: 'user', content: promptText }]);
 
     if (scenario === 'crash-mid-turn') {
       await connection.sessionUpdate({
@@ -193,12 +274,17 @@ const connection = new AgentSideConnection((_client) => ({
           sessionId,
           update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'permission denied' } },
         });
+        appendTranscript(sessionId, [{ type: 'assistant', operationType: 'Say', content: 'permission denied' }]);
         return { stopReason: 'end_turn' };
       }
       await connection.sessionUpdate({
         sessionId,
         update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'permission allowed, ran it' } },
       });
+      appendTranscript(sessionId, [
+        { type: 'assistant', operationType: 'Say', content: 'permission allowed, ran it' },
+        { type: 'usage_summary', promptTurnSummaries: [{ unit: 'credit', unitPlural: 'credits', usage: 0.1 }] },
+      ]);
       return { stopReason: 'end_turn' };
     }
 
@@ -271,6 +357,12 @@ const connection = new AgentSideConnection((_client) => ({
     }
     await connection.extNotification('_kiro.dev/metadata', { contextUsagePercentage: 12, turnDurationMs: 42 });
     await connection.extNotification('_kiro.dev/some_unknown_notification', { ignored: true });
+    appendTranscript(sessionId, [
+      { type: 'assistant', operationType: 'Say', content: 'Hello from the fake agent' },
+      { type: 'tool_call', toolCallId: 'tool-1', toolName: 'List files', args: { command: 'ls' } },
+      { type: 'tool_result', toolCallId: 'tool-1', content: 'file1.txt\nfile2.txt', success: true },
+      { type: 'usage_summary', promptTurnSummaries: [{ unit: 'credit', unitPlural: 'credits', usage: 0.25 }] },
+    ]);
 
     return { stopReason: 'end_turn' };
   },
@@ -295,7 +387,7 @@ const connection = new AgentSideConnection((_client) => ({
 
 void cancelled;
 
-if (scenario === 'echo-key-check') {
+if (defaultScenario === 'echo-key-check') {
   const sink = process.env.KIRO_FAKE_AGENT_KEY_SINK;
   if (sink) {
     // Proves the key reached this child's own environment — the test asserts

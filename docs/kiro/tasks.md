@@ -17,7 +17,7 @@ Legend: `[x]` done and committed, `[~]` code written but uncommitted/unverified,
 - [x] **T8** `docker/standard/Dockerfile`, `docker-compose.yml`, docs.
 - [x] **T6a** Fix: tool results without content crashed the chat UI (commit 08eb451a).
 - [x] **T6b** Upgrade the ACP integration to the Kiro CLI v3 engine (see the T6b section below).
-- [ ] **T6c** Browser end-to-end tests (Playwright).
+- [x] **T6c** Browser end-to-end tests (Playwright), see docs/kiro/e2e.md.
 - [ ] **T9** Verify (typecheck, lint, test, test:client, build), publish, Docker check, push.
 
 Each task ends with a conventional-commit commit.
