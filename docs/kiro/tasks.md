@@ -8,7 +8,10 @@ Legend: `[x]` done and committed, `[~]` code written but uncommitted/unverified,
 - [x] **T2** Rename package to `@namng108/cloudcli` 1.38.0, update all references, `npm pack --dry-run`. (commit 91c863c4)
 - [x] **T3** Kiro provider id, registry, auth, API-key store, save/clear routes, tests.
 - [x] **T4** `KiroAcpClient` and runtime (stream, permissions, cancel, crash), fake ACP agent tests.
-- [ ] **T5** Models/agents, sessions history, synchronizer, tests.
+- [ ] **T5** Models/agents, reasoning level, sessions history, synchronizer, tests. (reworked 2026-11-01 after GUI check, see "T5 rework" below)
+  - [ ] **T5a** Live Kiro model catalog from `session/new` (cache + static fallback), per-session model from `session.json`.
+  - [ ] **T5b** Reasoning level: Kiro effort levels in the capability matrix, runtime validate/apply, Model library shows "Reasoning level".
+  - [ ] **T5c** File-based session synchronizer + watcher, sidebar sessions, history reader, delete.
 - [ ] **T6** MCP, skills, token usage, fork/rewind capability, tests.
 - [x] **T7** Frontend: picker, login modal with API key, MCP constants, settings, api-docs, tests. (commit c36378c4)
 - [x] **T8** `docker/standard/Dockerfile`, `docker-compose.yml`, docs.
@@ -136,6 +139,14 @@ A parallel run of T3 and T8 was interrupted. Its output is in the working tree, 
 - `npm run typecheck` has one pre-existing failure in `src/modules/sidebar/tests/recentConversationTitleSync.test.ts` and needs `NODE_OPTIONS=--max-old-space-size=4096`.
 
 **Next step:** verify and commit T8, then T4, T5, T6, then T9.
+
+### T5 rework (2026-11-01)
+
+GUI check found three gaps: (1) only a "Default" Kiro model is listed, (2) the Model library has no "Reasoning level" for Kiro, (3) the Projects sidebar shows no Kiro sessions (for example `c:\users\admin\.kiro-ui\workspace` has three on disk).
+
+Decisions: delete in CloudCLI DOES delete Kiro's session files on disk (guarded, see `design.md`); rewind and fork children and subagent stubs are hidden; Kiro reasoning levels are `low, medium, high, xhigh, max`. Out of scope this round: `npm publish`, T6, T9. Commit and push `feature/kiro` to `origin`, then stop.
+
+Replaces the T3 stubs `kiro-models.provider.ts`, `kiro-sessions.provider.ts`, `kiro-session-synchronizer.provider.ts`. The frontend placeholders listed under "T7 inputs" are superseded by the backend capability response.
 
 ### T4 inputs from T3
 - Replace `server/modules/providers/list/kiro/kiro-runtime.provider.js` (currently throws `KIRO_RUNTIME_NOT_IMPLEMENTED`) with the real `KiroAcpClient`-backed runtime; wire it into `agent.routes.ts` / `server/index.ts` the same way Claude/Codex/Cursor/OpenCode are.

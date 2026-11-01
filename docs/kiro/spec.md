@@ -13,10 +13,13 @@
 - R1.2 Streaming of `agent_message_chunk`, `agent_thought_chunk`, `tool_call`, `tool_call_update`.
 - R1.3 Permission prompts (`session/request_permission`) routed through the existing permission UI.
 - R1.4 Cancel via the `session/cancel` notification.
-- R1.5 Session history and resume through ACP `session/list` and `session/load`.
-- R1.6 Models and agents (modes) taken from the `session/new` response, with a static fallback.
+- R1.5 Session list, sidebar presence and history come from Kiro's on-disk files under `~/.kiro/sessions` (file-based synchronizer and history reader), not from ACP `session/list`. Resume still uses ACP `session/load`. Kiro sessions appear under their project in the Projects sidebar beside other providers' sessions.
+- R1.6 Models and agents (modes) are taken from the `session/new` response (`models.availableModels`, `models.currentModelId`), cached, with a static fallback when `kiro-cli` or the API key is unavailable. The active model of an existing session comes from its `session.json`.
 - R1.7 MCP config read/write, skills discovery, token/context usage from `_kiro.dev/metadata`.
 - R1.8 Fork/rewind only where ACP supports it; otherwise reported as unsupported.
+- R1.9 Reasoning level: Kiro advertises effort levels `low, medium, high, xhigh, max`. The Model library shows "Reasoning level" for custom Kiro models, create and update validate against those levels, the composer offers Reasoning for models that declare levels, and the runtime applies the chosen level before the prompt.
+- R1.10 Sidebar rules: Kiro sessions whose `createdReason` is `rewind` or that have a `parentSessionId` (rewind or fork children) and subagent stubs are hidden. Paths are matched to projects case-insensitively on Windows so no duplicate project appears.
+- R1.11 Deleting a Kiro session in CloudCLI deletes its session directory on disk (and its entry in the Kiro `.index` cache), so it also disappears from Kiro and kiro-ui. Safeguards: the target must be inside `~/.kiro/sessions/<hash>/` and match the session id pattern, a held `.lock` or a running session refuses the delete, and `dashboard-search.db*` is never touched.
 
 ### R2 API-key login
 - R2.1 The key is pasted in the UI and saved to `~/.cloudcli/kiro-auth.json` with mode 0600 (atomic write).
