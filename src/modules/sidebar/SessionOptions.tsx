@@ -26,7 +26,7 @@ type SessionOptionsProps = {
   onStartEditingSession: (projectId: string, sessionId: string, initialName: string) => void;
   onCancelEditingSession: () => void;
   onSaveEditingSession: (projectId: string, sessionId: string, summary: string, provider: LLMProvider) => void;
-  onDeleteSession: (sessionId: string, sessionTitle: string) => void;
+  onDeleteSession: (sessionId: string, sessionTitle: string, options?: { isArchived?: boolean; provider?: string }) => void;
   /** Bound by the caller, which owns the session object the fork needs. */
   onFork?: () => void;
   /** Withheld where the row has nowhere to send a delete. */
@@ -188,7 +188,7 @@ export default function SessionOptions({
               icon: Trash2,
               isDanger: true,
               showDividerBefore: true,
-              onSelect: () => onDeleteSession(sessionId, sessionName),
+              onSelect: () => onDeleteSession(sessionId, sessionName, { provider }),
             }] : []),
           ]}
         />

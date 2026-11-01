@@ -112,3 +112,38 @@ export async function writeKiroIndex(
   );
   return indexPath;
 }
+
+/** Builds one `messages.jsonl` line the way Kiro writes it. */
+export function kiroMessageLine(
+  id: string,
+  payload: Record<string, unknown>,
+  timestamp: string = '2026-11-01T10:00:00.000Z',
+): Record<string, unknown> {
+  return { id, timestamp, payload };
+}
+
+/**
+ * Runs `run` against a fresh temporary database. Imported lazily so tests that
+ * only need the file fixtures do not initialize SQLite.
+ */
+export async function withKiroDatabase(run: () => Promise<void>): Promise<void> {
+  const { closeConnection, initializeDatabase } = await import('@/modules/database/index.js');
+  const previousDatabasePath = process.env.DATABASE_PATH;
+  const tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'kiro-sessions-db-'));
+
+  closeConnection();
+  process.env.DATABASE_PATH = path.join(tempDirectory, 'auth.db');
+  await initializeDatabase();
+
+  try {
+    await run();
+  } finally {
+    closeConnection();
+    if (previousDatabasePath === undefined) {
+      delete process.env.DATABASE_PATH;
+    } else {
+      process.env.DATABASE_PATH = previousDatabasePath;
+    }
+    await rm(tempDirectory, { recursive: true, force: true });
+  }
+}

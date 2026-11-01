@@ -5,6 +5,7 @@ import path from 'node:path';
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { broadcastSessionUpserted, chatRunRegistry } from '@/modules/websocket/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
+import { deleteKiroSessionFromDisk } from '@/modules/providers/list/kiro/kiro-session-delete.js';
 import { listBusyClaudeCliSessions } from '@/modules/providers/services/claude-cli-liveness.service.js';
 import { sessionHistoryCache } from '@/modules/providers/services/session-history-cache.service.js';
 import type {
@@ -699,6 +700,12 @@ export const sessionsService = {
 
     let removedFromDisk = false;
     if (options.deletedFromDisk) {
+      if (session.provider === 'kiro') {
+        // A Kiro session is a whole directory rather than one transcript file.
+        // This throws, before the row is touched, when the session is in use.
+        removedFromDisk = await deleteKiroSessionFromDisk(session.jsonl_path, session.provider_session_id);
+      }
+
       // Every file the conversation has lived in, not just the one the row
       // points at now: editing a message on a provider that rewinds by
       // branching moves the session onto a copy and leaves the earlier

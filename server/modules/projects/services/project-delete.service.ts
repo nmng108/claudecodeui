@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
+import { deleteKiroSessionFromDisk } from '@/modules/providers/index.js';
 import { AppError } from '@/shared/utils.js';
 
 function uniqueJsonlPathsFromSessions(
@@ -43,11 +44,24 @@ async function unlinkJsonlIfExists(filePath: string): Promise<void> {
  */
 export async function deleteSessionJsonlFilesForProjectPath(projectPath: string): Promise<void> {
   const sessions = sessionsDb.getSessionsByProjectPathIncludingArchived(projectPath);
+
+  // A Kiro session is a directory, so unlinking its transcript would leave a
+  // half-deleted session behind in Kiro. A session that is in use is skipped
+  // with a warning rather than blocking the project delete.
+  const kiroSessions = sessions.filter((session) => session.provider === 'kiro');
+  for (const session of kiroSessions) {
+    try {
+      await deleteKiroSessionFromDisk(session.jsonl_path, session.provider_session_id);
+    } catch (error) {
+      console.warn('[project-delete] Kept a Kiro session on disk:', (error as Error).message);
+    }
+  }
+
   // Including the transcripts a session has left behind: editing a message on
   // a provider that rewinds by branching moves the session onto a copy, and
   // the row stops pointing at the file the replaced turns are still in.
   const paths = uniqueJsonlPathsFromSessions([
-    ...sessions,
+    ...sessions.filter((session) => session.provider !== 'kiro'),
     ...sessions.flatMap((session) => sessionsDb
       .getSupersededTranscriptPaths(session.session_id)
       .map((jsonl_path) => ({ jsonl_path }))),

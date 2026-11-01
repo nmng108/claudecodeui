@@ -1543,7 +1543,7 @@ export type SessionRowActions = {
   onStartEditingSession: (projectId: string, sessionId: string, initialName: string) => void;
   onCancelEditingSession: () => void;
   onSaveEditingSession: (projectId: string, sessionId: string, summary: string, provider: LLMProvider) => void;
-  onDeleteSession: (sessionId: string, sessionTitle: string) => void;
+  onDeleteSession: (sessionId: string, sessionTitle: string, options?: { isArchived?: boolean; provider?: string }) => void;
   /** Branches a session into an independent one. Rows hide it for providers that cannot. */
   onForkSession?: (session: SessionWithProvider) => void;
 };
@@ -1655,7 +1655,7 @@ export type ActiveSidebarRename =
  */
 export type PendingSidebarDeletion =
   | { kind: 'project'; project: Project; sessionCount: number }
-  | { kind: 'session'; sessionId: string; sessionTitle: string; isArchived: boolean }
+  | { kind: 'session'; sessionId: string; sessionTitle: string; isArchived: boolean; provider?: string }
   | { kind: 'sessions'; sessionIds: string[] };
 
 /**

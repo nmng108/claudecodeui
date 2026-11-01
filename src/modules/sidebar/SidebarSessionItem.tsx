@@ -29,7 +29,7 @@ type SidebarSessionItemProps = {
   onSaveEditingSession: (projectName: string, sessionId: string, summary: string, provider: LLMProvider) => void;
   onProjectSelect: (project: Project) => void;
   onSessionSelect: (session: SessionWithProvider, projectName: string) => void;
-  onDeleteSession: (sessionId: string, sessionTitle: string) => void;
+  onDeleteSession: (sessionId: string, sessionTitle: string, options?: { isArchived?: boolean; provider?: string }) => void;
   /** Branches this session into an independent one; absent when its provider cannot. */
   onForkSession?: (session: SessionWithProvider) => void;
   /** This project's list is in bulk-selection mode: the row acts as a checkbox and hides its options. */
@@ -100,7 +100,7 @@ function SidebarSessionItem({
   };
 
   const requestDeleteSession = () => {
-    onDeleteSession(session.id, sessionView.sessionName);
+    onDeleteSession(session.id, sessionView.sessionName, { provider: session.__provider });
   };
 
   // A running session cannot be deleted, so it cannot be ticked either; the row

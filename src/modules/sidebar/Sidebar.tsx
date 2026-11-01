@@ -308,7 +308,7 @@ function Sidebar({
               showDeleteSessionConfirmation(
                 session.sessionId,
                 session.sessionTitle,
-                { isArchived: true },
+                { isArchived: true, provider: session.provider },
               );
             }}
             onConversationResultClick={(projectId: string | null, sessionId: string, provider: string, messageTimestamp?: string | null, messageSnippet?: string | null) => {

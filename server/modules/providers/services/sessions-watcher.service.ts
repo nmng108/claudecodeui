@@ -10,7 +10,15 @@ import type { LLMProvider } from '@/shared/types.js';
 
 type WatcherEventType = 'add' | 'change';
 
-const PROVIDER_WATCH_PATHS: Array<{ provider: LLMProvider; rootPath: string }> = [
+type WatchPathOptions = {
+  /** Extra directory names (below the root) the watcher must not enter. */
+  ignoredDirectoryNames?: ReadonlySet<string>;
+  /** Extra file names or name suffixes the watcher must not report. */
+  ignoredFileNames?: ReadonlySet<string>;
+  ignoredFileSuffixes?: readonly string[];
+};
+
+const PROVIDER_WATCH_PATHS: Array<{ provider: LLMProvider; rootPath: string } & WatchPathOptions> = [
   {
     provider: 'claude',
     rootPath: path.join(os.homedir(), '.claude', 'projects'),
@@ -26,6 +34,18 @@ const PROVIDER_WATCH_PATHS: Array<{ provider: LLMProvider; rootPath: string }> =
   {
     provider: 'opencode',
     rootPath: path.join(os.homedir(), '.local', 'share', 'opencode'),
+  },
+  {
+    provider: 'kiro',
+    rootPath: path.join(os.homedir(), '.kiro', 'sessions'),
+    // Each Kiro session keeps a `snapshots` tree of many small files and a
+    // `sub-executions` folder; polling them would stat all of it every
+    // interval. `.index` is Kiro's own cache, `cli` its legacy store of mostly
+    // empty subagent stubs, `.lock` changes with every open, and the dashboard
+    // database is a WAL SQLite file.
+    ignoredDirectoryNames: new Set(['snapshots', 'sub-executions', '.index', 'cli']),
+    ignoredFileNames: new Set(['.lock']),
+    ignoredFileSuffixes: ['.db', '.db-shm', '.db-wal'],
   },
 ];
 
@@ -58,7 +78,10 @@ const IGNORED_FILE_SUFFIXES = ['.tmp', '.swp'];
  * Exported for the providers module's tests, which run it against chokidar on
  * a real directory tree.
  */
-export function createWatcherIgnoredMatcher(rootPath: string): (filePath: string) => boolean {
+export function createWatcherIgnoredMatcher(
+  rootPath: string,
+  extra: WatchPathOptions = {},
+): (filePath: string) => boolean {
   return (filePath: string) => {
     const relativePath = path.relative(rootPath, filePath);
     // Outside the root is `..` as a whole component, or an absolute result
@@ -72,11 +95,17 @@ export function createWatcherIgnoredMatcher(rootPath: string): (filePath: string
 
     const segments = relativePath.split(path.sep);
     const baseName = segments[segments.length - 1];
-    if (IGNORED_FILE_NAMES.has(baseName) || IGNORED_FILE_SUFFIXES.some((suffix) => baseName.endsWith(suffix))) {
+    if (
+      IGNORED_FILE_NAMES.has(baseName)
+      || IGNORED_FILE_SUFFIXES.some((suffix) => baseName.endsWith(suffix))
+      || extra.ignoredFileNames?.has(baseName)
+      || extra.ignoredFileSuffixes?.some((suffix) => baseName.endsWith(suffix))
+    ) {
       return true;
     }
 
-    return segments.some((segment) => IGNORED_DIRECTORY_NAMES.has(segment));
+    return segments.some((segment) =>
+      IGNORED_DIRECTORY_NAMES.has(segment) || extra.ignoredDirectoryNames?.has(segment));
   };
 }
 
@@ -108,6 +137,11 @@ let watcherRescheduleAfterRefresh = false;
 function isWatcherTargetFile(provider: LLMProvider, filePath: string): boolean {
   if (provider === 'opencode') {
     return path.basename(filePath) === 'opencode.db';
+  }
+
+  if (provider === 'kiro') {
+    const baseName = path.basename(filePath);
+    return baseName === 'session.json' || baseName === 'messages.jsonl';
   }
 
   return filePath.endsWith('.jsonl');
@@ -243,12 +277,12 @@ export async function initializeSessionsWatcher(): Promise<void> {
     failures: initialSync.failures,
   });
 
-  for (const { provider, rootPath } of PROVIDER_WATCH_PATHS) {
+  for (const { provider, rootPath, ...ignoreOptions } of PROVIDER_WATCH_PATHS) {
     try {
       await fsPromises.mkdir(rootPath, { recursive: true });
 
       const watcher = chokidar.watch(rootPath, {
-        ignored: createWatcherIgnoredMatcher(rootPath),
+        ignored: createWatcherIgnoredMatcher(rootPath, ignoreOptions),
         persistent: true,
         ignoreInitial: true,
         followSymlinks: false,

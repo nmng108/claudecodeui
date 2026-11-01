@@ -8,10 +8,10 @@ Legend: `[x]` done and committed, `[~]` code written but uncommitted/unverified,
 - [x] **T2** Rename package to `@namng108/cloudcli` 1.38.0, update all references, `npm pack --dry-run`. (commit 91c863c4)
 - [x] **T3** Kiro provider id, registry, auth, API-key store, save/clear routes, tests.
 - [x] **T4** `KiroAcpClient` and runtime (stream, permissions, cancel, crash), fake ACP agent tests.
-- [ ] **T5** Models/agents, reasoning level, sessions history, synchronizer, tests. (reworked 2026-11-01 after GUI check, see "T5 rework" below)
-  - [ ] **T5a** Live Kiro model catalog from `session/new` (cache + static fallback), per-session model from `session.json`.
-  - [ ] **T5b** Reasoning level: Kiro effort levels in the capability matrix, runtime validate/apply, Model library shows "Reasoning level".
-  - [ ] **T5c** File-based session synchronizer + watcher, sidebar sessions, history reader, delete.
+- [x] **T5** Models/agents, reasoning level, sessions history, synchronizer, tests. (reworked 2026-11-01 after GUI check, see "T5 rework" below)
+  - [x] **T5a** Live Kiro model catalog from `session/new` (cache + static fallback), per-session model from `session.json`.
+  - [x] **T5b** Reasoning level: Kiro effort levels in the capability matrix, runtime validate/apply, Model library shows "Reasoning level".
+  - [x] **T5c** File-based session synchronizer + watcher, sidebar sessions, history reader, delete.
 - [ ] **T6** MCP, skills, token usage, fork/rewind capability, tests.
 - [x] **T7** Frontend: picker, login modal with API key, MCP constants, settings, api-docs, tests. (commit c36378c4)
 - [x] **T8** `docker/standard/Dockerfile`, `docker-compose.yml`, docs.
@@ -148,6 +148,14 @@ Decisions: delete in CloudCLI DOES delete Kiro's session files on disk (guarded,
 
 Replaces the T3 stubs `kiro-models.provider.ts`, `kiro-sessions.provider.ts`, `kiro-session-synchronizer.provider.ts`. The frontend placeholders listed under "T7 inputs" are superseded by the backend capability response.
 
+**T5 results (2026-11-01)**
+- T5a: `kiro-models.provider.ts` reads `models.availableModels` / `currentModelId` from a short-lived `kiro-cli acp` `session/new` and caches it (10 min, 30 s when empty, stale-while-revalidate, shared in-flight read). The runtime seeds the same cache from its own `session/new`, applies the chosen model with `session/set_model` (sent as a raw ext request, since SDK 1.9 no longer wraps it) and tells the user if Kiro rejects it. Static fallback: `auto`, `claude-sonnet-5.5`, `claude-sonnet-5`. The active model of a session comes from its `session.json`. Frontend fallback default is `auto`.
+- T5b: Kiro `supportsEffort: true`, levels `low, medium, high, xhigh, max` (a ceiling; Kiro's real levels depend on the model and were not probed live because that needs a key). The Model library needed no change: `EFFORT_LEVELS` comes from the capability matrix. The runtime sends a level only when the selected model declares it, via a muted `/effort <level>` turn (the way kiro-ui does it).
+- T5c: file-based synchronizer, history reader, watcher entry and guarded delete, see `design.md`. Checked against the real `~/.kiro`: workspace `c:\users\admin\.kiro-ui\workspace` reuses the existing lowercase project, and a 363-message session loads.
+- **Behavior to know:** the three sessions in that workspace are one rewind chain (`cli_0e8a9031` is the original, `sess_4c480f3b` a rewind of it, `sess_c78d1a7b` a rewind of that and the newest). The agreed default hides rewind children, so only `cli_0e8a9031` shows. Set `CLOUDCLI_KIRO_SHOW_BRANCH_SESSIONS=true` to list all three.
+- Deviation from the plan: Kiro's `.index/index.json` is not read or edited (it can lag and Kiro revalidates it itself), and the legacy `sessions/cli/` store is not indexed (only subagent stubs here).
+- Not changed: `supportsAbort`, `supportsPermissionRequests`, `supportsImages` and `supportsFiles` are still `false` in the Kiro capability entry although the T4 runtime implements abort and permission requests. Left for T6 / a follow-up so this change stays on the three reported issues.
+- Tests: server provider/agent/project suites 470 pass, 17 fail, all 17 pre-existing (13 Claude auth/hold, 4 Windows-path assumptions in agent and project tests, identical on the previous commit). Client suite: 120 files pass. Lint: 0 errors. Server typecheck clean; the one client typecheck error is the known `recentConversationTitleSync.test.ts` fixture.
 ### T4 inputs from T3
 - Replace `server/modules/providers/list/kiro/kiro-runtime.provider.js` (currently throws `KIRO_RUNTIME_NOT_IMPLEMENTED`) with the real `KiroAcpClient`-backed runtime; wire it into `agent.routes.ts` / `server/index.ts` the same way Claude/Codex/Cursor/OpenCode are.
 - Key resolution for spawn env: `resolveKiroApiKey()` from `server/modules/providers/list/kiro/kiro-api-key.store.ts` returns the key to inject as `KIRO_API_KEY` (env precedence already applied); never read `getKiroApiKeyState()`'s `masked` field for that purpose.

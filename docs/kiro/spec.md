@@ -18,8 +18,8 @@
 - R1.7 MCP config read/write, skills discovery, token/context usage from `_kiro.dev/metadata`.
 - R1.8 Fork/rewind only where ACP supports it; otherwise reported as unsupported.
 - R1.9 Reasoning level: Kiro advertises effort levels `low, medium, high, xhigh, max`. The Model library shows "Reasoning level" for custom Kiro models, create and update validate against those levels, the composer offers Reasoning for models that declare levels, and the runtime applies the chosen level before the prompt.
-- R1.10 Sidebar rules: Kiro sessions whose `createdReason` is `rewind` or that have a `parentSessionId` (rewind or fork children) and subagent stubs are hidden. Paths are matched to projects case-insensitively on Windows so no duplicate project appears.
-- R1.11 Deleting a Kiro session in CloudCLI deletes its session directory on disk (and its entry in the Kiro `.index` cache), so it also disappears from Kiro and kiro-ui. Safeguards: the target must be inside `~/.kiro/sessions/<hash>/` and match the session id pattern, a held `.lock` or a running session refuses the delete, and `dashboard-search.db*` is never touched.
+- R1.10 Sidebar rules: Subagent sessions are always hidden. Sessions that Kiro created by rewinding or forking another session (`createdReason` `rewind` or `fork`, or a `parentSessionId`) are hidden by default, because a chain of rewinds is one conversation; setting `CLOUDCLI_KIRO_SHOW_BRANCH_SESSIONS=true` lists them. Windows-style paths are matched to existing projects case-insensitively so no duplicate project appears.
+- R1.11 Deleting a Kiro session in CloudCLI deletes its session directory on disk, so it also disappears from Kiro and kiro-ui. Kiro's own index caches are left alone. Safeguards: the target must be inside `~/.kiro/sessions/<hash>/` and match the session id pattern, a held `.lock` or a running session refuses the delete, and `dashboard-search.db*` is never touched.
 
 ### R2 API-key login
 - R2.1 The key is pasted in the UI and saved to `~/.cloudcli/kiro-auth.json` with mode 0600 (atomic write).

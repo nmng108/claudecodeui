@@ -1,4 +1,4 @@
-﻿# Providers Module Guide
+# Providers Module Guide
 
 This file documents the current provider contract in `server/modules/providers`.
 Keep it current whenever provider wiring, skill discovery, or session sync
@@ -45,6 +45,7 @@ Current provider ids in this repo are:
 - `codex`
 - `cursor`
 - `opencode`
+- `kiro`
 
 Those ids are mirrored in backend unions and frontend provider constants. If
 adding a new provider, update every place that hardcodes this list.
@@ -65,7 +66,7 @@ server/modules/providers/list/<provider>/
   <provider>-session-synchronizer.provider.ts
 ```
 
-The existing provider folders are `claude`, `codex`, `cursor`, and `opencode`.
+The existing provider folders are `claude`, `codex`, `cursor`, `opencode`, and `kiro`.
 
 Each provider wrapper owns its SDK/CLI runtime alongside its auth, model, and
 session facets. Runtime adapters receive registry-backed model and session
@@ -212,6 +213,7 @@ Current session sync roots are:
 | Codex | `~/.codex/sessions/**/*.jsonl` | Uses `~/.codex/session_index.jsonl` for title lookup and the last `task_complete` message for a fallback title. |
 | Cursor | `~/.cursor/projects/**/*.jsonl` | Uses sibling `worker.log` to recover `workspacePath`, then derives the session title from the first user prompt. |
 | OpenCode | `~/.local/share/opencode/opencode.db` | Reads active sessions/messages/parts from OpenCode's shared SQLite database and stores `jsonl_path` as `null` so deleting one app session cannot remove the shared DB. |
+| Kiro | `~/.kiro/sessions/<wsHash>/<sess_ or cli_ id>/{session.json,messages.jsonl}` | Reads each `session.json` (Kiro's `.index/index.json` cache is not used). Needs a non-empty `messages.jsonl` and a project path. Hides subagent sessions and, by default, rewind and fork children (`CLOUDCLI_KIRO_SHOW_BRANCH_SESSIONS=true` lists them). Reuses an existing project that differs only by case on Windows paths. The row stores the `messages.jsonl` path, and deleting from disk removes the whole session directory (`kiro-session-delete.ts`, refused while the session is locked or running). |
 
 8. Register the provider.
 

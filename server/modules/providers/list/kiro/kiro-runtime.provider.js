@@ -36,6 +36,22 @@ function sessionMapKey(sessionId, acpSessionId) {
 }
 
 /**
+ * Whether a turn is running right now for the given Kiro session id. Used to
+ * refuse deleting a session's files while the agent is still writing them.
+ */
+export function isKiroSessionRunning(providerSessionId) {
+  if (!providerSessionId) {
+    return false;
+  }
+  for (const entry of activeKiroSessions.values()) {
+    if (entry.status === 'running' && entry.client?.getSessionId() === providerSessionId) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Returns the reasoning level to apply, or `undefined` when none should be
  * sent. A level is only used when the selected model declares it, matching the
  * other runtimes; `default` and unknown levels leave Kiro's own setting alone.

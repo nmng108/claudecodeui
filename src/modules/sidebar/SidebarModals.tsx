@@ -175,6 +175,14 @@ export default function SidebarModals({
                         ? t('deleteConfirmation.archivedSessionNotice', 'This session is already archived. You can keep it hidden or delete it permanently.')
                         : t('deleteConfirmation.archiveSessionNotice', 'Archive keeps the session out of the active list while preserving its history.')}
                     </p>
+                    {pendingDeletion.provider === 'kiro' && (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        {t(
+                          'deleteConfirmation.kiroSessionNotice',
+                          'Deleting permanently also removes this session from Kiro and kiro-ui.',
+                        )}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>

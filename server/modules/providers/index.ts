@@ -12,3 +12,7 @@ export { sessionsService } from './services/sessions.service.js';
 
 export { initializeSessionsWatcher } from './services/sessions-watcher.service.js';
 export { closeSessionsWatcher } from './services/sessions-watcher.service.js';
+
+// deleteKiroSessionFromDisk: used by Projects when it force-deletes a project, because a Kiro
+// session is a directory and not one transcript file.
+export { deleteKiroSessionFromDisk } from './list/kiro/kiro-session-delete.js';

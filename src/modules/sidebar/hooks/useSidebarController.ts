@@ -908,13 +908,14 @@ export function useSidebarController({
     (
       sessionId: string,
       sessionTitle: string,
-      options: { isArchived?: boolean } = {},
+      options: { isArchived?: boolean; provider?: string } = {},
     ) => {
       setPendingDeletion({
         kind: 'session',
         sessionId,
         sessionTitle,
         isArchived: Boolean(options.isArchived),
+        provider: options.provider,
       });
     },
     [],

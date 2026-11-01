@@ -163,6 +163,7 @@
     "archiveSession": "Archive session",
     "archiveSessionNotice": "Archive keeps the session out of the active list while preserving its history.",
     "archivedSessionNotice": "This session is already archived. You can keep it hidden or delete it permanently.",
+    "kiroSessionNotice": "Deleting permanently also removes this session from Kiro and kiro-ui.",
     "deleteSessionPermanently": "Delete permanently",
     "deleteAllData": "Delete all data permanently",
     "allConversationsDeleted": "The project will be removed from the sidebar. Your files, memories, and session data will be preserved.",
