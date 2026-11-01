@@ -7,6 +7,7 @@ import { notifyRunFailed, notifyRunStopped } from '@/modules/notifications/index
 import { createCompleteMessage, createNormalizedMessage, generateMessageId } from '@/shared/utils.js';
 import { resolveKiroApiKey } from '@/modules/providers/list/kiro/kiro-api-key.store.js';
 import { KiroAcpClient } from '@/modules/providers/list/kiro/kiro-acp.client.js';
+import { buildKiroToolResult } from '@/modules/providers/list/kiro/kiro-tool-output.js';
 import { seedKiroModelCatalog } from '@/modules/providers/list/kiro/kiro-models.provider.js';
 
 /** Live ACP clients keyed by the app session id (falling back to the ACP session id for legacy/direct callers). */
@@ -146,23 +147,29 @@ async function runKiro(command, options = {}, ws, context) {
                 toolId: event.toolCallId,
                 toolName: event.title,
                 toolInput: event.rawInput,
-                content: event.content,
                 status: event.status,
                 sessionId: activeSessionId,
                 provider: 'kiro',
               }));
               break;
             case 'tool_call_update':
-              ws.send(createNormalizedMessage({
-                kind: 'tool_result',
-                toolId: event.toolCallId,
-                toolResult: { content: typeof event.rawOutput === 'string' ? event.rawOutput : JSON.stringify(event.rawOutput ?? '') },
-                status: event.status,
-                content: event.content,
-                sessionId: activeSessionId,
-                provider: 'kiro',
-              }));
+            {
+              // Only a finished tool has a result; pending/in_progress updates are progress.
+              const result = buildKiroToolResult(event);
+              if (result) {
+                ws.send(createNormalizedMessage({
+                  kind: 'tool_result',
+                  toolId: event.toolCallId,
+                  toolResult: result.toolResult,
+                  content: result.content,
+                  isError: result.isError,
+                  status: event.status,
+                  sessionId: activeSessionId,
+                  provider: 'kiro',
+                }));
+              }
               break;
+            }
             case 'plan':
               // No dedicated normalized "plan" message kind exists yet app-wide;
               // riding on `status` (like Codex/Claude's `token_budget`) keeps this
@@ -174,7 +181,6 @@ async function runKiro(command, options = {}, ws, context) {
                 kind: 'tool_use',
                 toolId: event.toolCallId || generateMessageId('kiro_chunk'),
                 toolName: event.title,
-                content: event.content,
                 sessionId: activeSessionId,
                 provider: 'kiro',
               }));

@@ -271,3 +271,15 @@ test('an updated event finds a call launched before this page loaded through its
   const [row] = normalizedToChatMessages([workflowCall, launchAck, killed]);
   assert.equal(row?.taskStatus?.status, 'stopped');
 });
+
+test('a tool result without content does not crash and renders as an empty result', () => {
+  const toolUse = message('tool-use', { kind: 'tool_use', toolId: 'tool-9', toolName: 'List files' });
+  const noContent = message('tool-result', { kind: 'tool_result', toolId: 'tool-9', content: undefined });
+  const nullContent = message('tool-result-2', { kind: 'tool_result', toolId: 'tool-9', content: null as unknown as string });
+
+  for (const result of [noContent, nullContent]) {
+    const rows = normalizedToChatMessages([toolUse, result]);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]?.toolResult?.content, '');
+  }
+});

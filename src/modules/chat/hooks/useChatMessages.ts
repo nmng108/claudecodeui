@@ -7,7 +7,11 @@ import type { ChatMessage, LiveTaskStatus, NormalizedMessage, SubagentActivity }
 import { formatUsageLimitText } from '@/modules/chat/utils/chatFormatting';
 
 function formatToolResultContent(content: unknown): string {
-  const text = typeof content === 'string' ? content : JSON.stringify(content);
+  // JSON.stringify(undefined) is undefined, so a result without content must be handled first.
+  if (content === undefined || content === null) {
+    return '';
+  }
+  const text = typeof content === 'string' ? content : (JSON.stringify(content) ?? '');
   const toolUseErrorMatch = /^<tool_use_error>([\s\S]*)<\/tool_use_error>$/.exec(text.trim());
   return toolUseErrorMatch ? toolUseErrorMatch[1] : text;
 }
