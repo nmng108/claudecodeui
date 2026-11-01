@@ -13,7 +13,7 @@ import { useFileTreeViewMode } from '@/modules/file-tree/hooks/useFileTreeViewMo
 import { useFileTreeUpload } from '@/modules/file-tree/hooks/useFileTreeUpload';
 import type { DirectoryRevealRequest, FileTreeImageSelection, FileTreeNode,Project } from '@/shared/types';
 import { formatFileSize, formatRelativeTime, isImageFile } from '@/modules/file-tree/utils/fileTreeUtils';
-import { directoryRevealPaths } from '@/modules/file-tree/utils/revealDirectory';
+import { directoryRevealProgress } from '@/modules/file-tree/utils/revealDirectory';
 import { ScrollArea, Input } from '@/shared/ui';
 import FileTreeBody from '@/modules/file-tree/FileTreeBody';
 import FileTreeDetailedColumns from '@/modules/file-tree/FileTreeDetailedColumns';
@@ -52,32 +52,54 @@ export default function FileTree({ selectedProject, onFileOpen, revealDirectory 
     }
   }, [toast]);
 
-  const { files, loading, error, refreshFiles } = useFileTreeData(selectedProject);
+  const { files, loading, error, refreshFiles, loadDirectory } = useFileTreeData(selectedProject);
   const { viewMode, changeViewMode } = useFileTreeViewMode();
   const { expandedDirs, toggleDirectory, expandDirectories, collapseAll } = useExpandedDirectories();
-  const { searchQuery, setSearchQuery, filteredFiles } = useFileTreeSearch({
-    files,
-    expandDirectories,
-  });
+  const {
+    searchQuery,
+    setSearchQuery,
+    isSearching,
+    searchTree,
+    searchExpandedDirs,
+    searchLoading,
+    searchTruncated,
+    searchError,
+  } = useFileTreeSearch({ projectId: selectedProject?.projectId });
+
+  // Folders load when they are expanded, whether by a click, a reveal request
+  // or a restored state. Requests are de-duplicated by the data hook, so
+  // running this after every tree change is cheap and also picks up folders
+  // that a refresh left without children.
+  useEffect(() => {
+    expandedDirs.forEach(loadDirectory);
+  }, [expandedDirs, files, loadDirectory]);
+
+  // While a query is typed the tree shows the server's matches, with every
+  // folder on the way to a match open; otherwise it shows the folders as browsed.
+  const visibleFiles = isSearching ? searchTree : files;
+  const visibleExpandedDirs = isSearching ? searchExpandedDirs : expandedDirs;
 
   // The reveal request already served, so a later tree refresh does not fold
   // the folders open again over a collapse the user has since made.
   const revealedRef = useRef<DirectoryRevealRequest | null>(null);
 
   // Expand every ancestor between the project root and the requested folder.
-  // A request that arrives before the tree finds nothing to expand and is
+  // Folders load as they open, so a deep reference resolves one level per
+  // tree update: the request stays pending until the walk is settled, and a
+  // request that arrives before the tree finds nothing to expand and is
   // retried when `files` lands.
   useEffect(() => {
     const projectRoot = selectedProject?.path || selectedProject?.fullPath;
-    if (!revealDirectory || !projectRoot || revealedRef.current === revealDirectory) {
+    if (!revealDirectory || !projectRoot || revealedRef.current === revealDirectory || files.length === 0) {
       return;
     }
-    const paths = directoryRevealPaths(files, projectRoot, revealDirectory.path);
-    if (paths.length === 0) {
-      return;
+    const { paths, settled } = directoryRevealProgress(files, projectRoot, revealDirectory.path);
+    if (paths.length > 0) {
+      expandDirectories(paths);
     }
-    revealedRef.current = revealDirectory;
-    expandDirectories(paths);
+    if (settled) {
+      revealedRef.current = revealDirectory;
+    }
   }, [revealDirectory, selectedProject?.path, selectedProject?.fullPath, expandDirectories, files]);
 
   // File operations
@@ -227,7 +249,7 @@ export default function FileTree({ selectedProject, onFileOpen, revealDirectory 
 
       <FileTreeUploadProgress upload={upload.uploadProgress} />
 
-      {viewMode === 'detailed' && filteredFiles.length > 0 && <FileTreeDetailedColumns />}
+      {viewMode === 'detailed' && visibleFiles.length > 0 && <FileTreeDetailedColumns />}
 
       <ScrollArea className="flex-1 px-2 py-1">
         {/* New item input */}
@@ -262,13 +284,20 @@ export default function FileTree({ selectedProject, onFileOpen, revealDirectory 
           </div>
         )}
 
+        {isSearching && searchLoading && visibleFiles.length === 0 && !searchError && (
+          <div className="flex items-center gap-2 px-2 py-3 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            {t('fileTree.searching', 'Searching…')}
+          </div>
+        )}
+
         <FileTreeBody
           files={files}
-          filteredFiles={filteredFiles}
-          error={error}
-          searchQuery={searchQuery}
+          filteredFiles={visibleFiles}
+          error={error ?? searchError}
+          searchQuery={isSearching && searchLoading && visibleFiles.length === 0 ? '' : searchQuery}
           viewMode={viewMode}
-          expandedDirs={expandedDirs}
+          expandedDirs={visibleExpandedDirs}
           onItemClick={handleItemClick}
           renderFileIcon={renderFileIcon}
           formatFileSize={formatFileSize}
@@ -292,6 +321,12 @@ export default function FileTree({ selectedProject, onFileOpen, revealDirectory 
           renameInputRef={renameInputRef}
           operationLoading={operationLoading}
         />
+
+        {isSearching && searchTruncated && (
+          <p className="px-2 py-2 text-xs text-muted-foreground">
+            {t('fileTree.searchTruncated', 'Showing the first matches. Type more to narrow the search.')}
+          </p>
+        )}
       </ScrollArea>
 
       {selectedImage && (

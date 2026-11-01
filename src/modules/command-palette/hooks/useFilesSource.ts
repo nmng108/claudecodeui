@@ -1,41 +1,40 @@
+import { useEffect, useState } from 'react';
+
 import { api } from '@/shared/api';
 import { useApiSource } from '@/modules/command-palette/hooks/useApiSource';
+import type { FileTreeSearchResponse } from '@/shared/types';
 
 export type FileResult = {
   path: string;
   name: string;
 };
 
-type FileNode = {
-  type: 'file' | 'directory';
-  name: string;
-  path: string;
-  children?: FileNode[];
-};
+const MAX_FILES = 200;
+// The palette searches as you type; coalesce keystrokes into one request.
+const SEARCH_DEBOUNCE_MS = 200;
 
-const MAX_FILES = 500;
+/**
+ * Files for the command palette, searched on the server so a workspace of any
+ * size can be searched without loading its tree into the browser. With an empty
+ * query it returns the files nearest the project root.
+ */
+export function useFilesSource(projectId: string | undefined, enabled: boolean, search = '') {
+  const [debouncedSearch, setDebouncedSearch] = useState(search.trim());
 
-function flatten(nodes: FileNode[], out: FileResult[]): void {
-  for (const node of nodes) {
-    if (out.length >= MAX_FILES) return;
-    if (node.type === 'file') {
-      out.push({ path: node.path, name: node.name });
-    } else if (node.children && node.children.length > 0) {
-      flatten(node.children, out);
-    }
-  }
-}
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [search]);
 
-export function useFilesSource(projectId: string | undefined, enabled: boolean) {
-  return useApiSource<FileResult, unknown>({
+  return useApiSource<FileResult, FileTreeSearchResponse>({
     enabled: enabled && !!projectId,
-    deps: [projectId],
-    fetcher: (signal) => api.getFiles(projectId!, { signal }),
-    parse: (data) => {
-      const tree: FileNode[] = Array.isArray(data) ? (data as FileNode[]) : [];
-      const flat: FileResult[] = [];
-      flatten(tree, flat);
-      return flat;
-    },
+    deps: [projectId, debouncedSearch],
+    fetcher: (signal) => api.searchFiles(
+      projectId!,
+      { query: debouncedSearch, type: 'file', limit: MAX_FILES },
+      { signal },
+    ),
+    parse: (data) => (Array.isArray(data?.results) ? data.results : [])
+      .map((result) => ({ path: result.path, name: result.name })),
   });
 }

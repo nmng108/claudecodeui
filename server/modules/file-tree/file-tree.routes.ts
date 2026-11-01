@@ -161,8 +161,21 @@ export function createFileTreeRouter(
     response.json(await services.saveTextFile(readProjectId(request), filePath, body.content));
   }, logger));
 
+  // One directory level per request; the browser loads a folder when it is expanded.
   router.get('/projects/:projectId/files', createRouteHandler(async (request, response) => {
-    response.json(await services.listProjectFiles(readProjectId(request), {
+    response.json(await services.listDirectory(readProjectId(request), {
+      directoryPath: readOptionalString(request.query.path) ?? undefined,
+      respectGitignore: request.query.respectGitignore === 'true',
+    }));
+  }, logger));
+
+  router.get('/projects/:projectId/files/search', createRouteHandler(async (request, response) => {
+    const rawLimit = Number(request.query.limit);
+    const rawType = request.query.type;
+    response.json(await services.searchProjectFiles(readProjectId(request), {
+      query: readOptionalString(request.query.q) ?? '',
+      limit: Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : undefined,
+      type: rawType === 'file' || rawType === 'directory' ? rawType : 'any',
       respectGitignore: request.query.respectGitignore === 'true',
     }));
   }, logger));

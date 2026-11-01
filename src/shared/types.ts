@@ -969,6 +969,22 @@ export type FileTreeNode = {
   [key: string]: unknown;
 };
 
+/** One directory level from `GET /api/file-tree/projects/:id/files`; `truncated` marks a directory too large to list in full. */
+export type FileTreeListing = {
+  path: string;
+  entries: FileTreeNode[];
+  truncated: boolean;
+};
+
+/** A server-side file search hit: a tree node plus its project-relative, `/`-separated path. */
+export type FileTreeSearchHit = FileTreeNode & { relativePath: string };
+
+/** Response of the project file search; `truncated` means more matches exist than were returned or the search stopped early. */
+export type FileTreeSearchResponse = {
+  results: FileTreeSearchHit[];
+  truncated: boolean;
+};
+
 /** The image the file tree asked to preview, carrying the path plus the DB `projectId` the image viewer needs to build its raw content URL. */
 export type FileTreeImageSelection = {
   name: string;

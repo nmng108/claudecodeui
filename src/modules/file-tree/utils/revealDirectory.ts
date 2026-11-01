@@ -24,6 +24,23 @@ export function directoryRevealPaths(
   projectPath: string,
   reference: string,
 ): string[] {
+  return directoryRevealProgress(files, projectPath, reference).paths;
+}
+
+/**
+ * Like `directoryRevealPaths`, but also says whether the answer is final.
+ *
+ * Folders load when they are first expanded, so a deep reference resolves one
+ * level at a time: `settled` is false while the walk stopped at a folder whose
+ * children have not arrived yet, and the caller should ask again once the tree
+ * changes. It is true when every level was found, or when a level that has
+ * loaded simply does not contain the next name.
+ */
+export function directoryRevealProgress(
+  files: FileTreeNode[],
+  projectPath: string,
+  reference: string,
+): { paths: string[]; settled: boolean } {
   const root = normalizePath(projectPath);
   const target = normalizePath(reference);
 
@@ -32,21 +49,24 @@ export function directoryRevealPaths(
     if (!target.startsWith(`${root}/`)) {
       // Either the project root itself (nothing to expand) or a path outside
       // it — `/workspace/apple` must not be read as a child of `/workspace/app`.
-      return [];
+      return { paths: [], settled: true };
     }
     relative = target.slice(root.length + 1);
   }
 
   const paths: string[] = [];
   let level = files;
+  // The root listing is always loaded; a deeper level is loaded once its folder has `children`.
+  let levelLoaded = true;
   for (const segment of relative.split('/').filter(Boolean)) {
     const directory = level.find((node) => node.type === 'directory' && node.name === segment);
     if (!directory) {
-      break;
+      return { paths, settled: levelLoaded };
     }
     paths.push(directory.path);
+    levelLoaded = directory.children !== undefined;
     level = directory.children ?? [];
   }
 
-  return paths;
+  return { paths, settled: true };
 }

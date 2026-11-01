@@ -1,14 +1,7 @@
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 
 import { api } from '@/shared/api';
-import type { Project } from '@/shared/types';
-
-type FileNode = {
-  type: 'file' | 'directory';
-  name: string;
-  path: string;
-  children?: FileNode[];
-};
+import type { FileTreeSearchResponse, Project } from '@/shared/types';
 
 type FlatFile = {
   name: string;
@@ -25,16 +18,6 @@ const normalize = (value: string): string => value.replace(/\\/g, '/');
 // `C:/…`; counting it as absolute lets a Windows server resolve it as-is and a
 // POSIX one answer an honest 404 instead of opening some other file.
 const isAbsoluteRef = (value: string): boolean => /^(\/|[A-Za-z]:\/)/.test(value);
-
-const flatten = (nodes: FileNode[], out: FlatFile[]): void => {
-  for (const node of nodes) {
-    if (node.type === 'file') {
-      out.push({ name: node.name, path: node.path });
-    } else if (node.children && node.children.length > 0) {
-      flatten(node.children, out);
-    }
-  }
-};
 
 // References inside chat messages are often bare basenames (`foo.ts`) or partial
 // paths (`utils/foo.ts`) rather than full paths, so match by path suffix and
@@ -59,7 +42,7 @@ const findBestMatch = (files: FlatFile[], ref: string): string | null => {
 
 /**
  * Wraps an `onFileOpen` handler so a possibly bare/partial file reference is
- * resolved against the project's file tree (cached per project) before the file
+ * resolved against the project, by searching it on the server, before the file
  * is opened in the in-app editor.
  */
 export function useFileOpenResolver(
@@ -67,39 +50,42 @@ export function useFileOpenResolver(
   onFileOpen: OnFileOpen,
 ): OnFileOpen {
   const projectId = selectedProject?.projectId;
-  const cacheRef = useRef<{ projectId?: string; files: Promise<FlatFile[]> | null }>({
-    projectId: undefined,
-    files: null,
-  });
-
-  const loadFiles = useCallback((): Promise<FlatFile[]> => {
-    if (!projectId) {
-      return Promise.resolve([]);
+  const searchFiles = useCallback(async (searchText: string): Promise<FlatFile[]> => {
+    if (!projectId || !searchText) {
+      return [];
     }
-    if (cacheRef.current.projectId === projectId && cacheRef.current.files) {
-      return cacheRef.current.files;
-    }
-
-    const filesPromise = (async () => {
-      try {
-        const response = await api.getFiles(projectId);
-        if (!response.ok) {
-          return [];
-        }
-        const data = await response.json();
-        const tree: FileNode[] = Array.isArray(data) ? data : [];
-        const flat: FlatFile[] = [];
-        flatten(tree, flat);
-        return flat;
-      } catch {
+    try {
+      const response = await api.searchFiles(projectId, {
+        query: searchText,
+        type: 'file',
+        limit: 100,
+        // A file named in chat is opened even when it is gitignored.
+        respectGitignore: false,
+      });
+      if (!response.ok) {
         return [];
       }
-    })();
-
-    cacheRef.current = { projectId, files: filesPromise };
-    return filesPromise;
+      const data = (await response.json()) as FileTreeSearchResponse;
+      return (Array.isArray(data?.results) ? data.results : []).map((result) => ({
+        name: result.name,
+        path: result.path,
+      }));
+    } catch {
+      return [];
+    }
   }, [projectId]);
 
+  // Matches the whole reference first (`src/foo.ts`), then falls back to the
+  // bare filename, as the old whole-tree lookup did.
+  const resolveReference = useCallback(async (ref: string): Promise<string | null> => {
+    const target = normalize(ref).replace(/^\.\//, '').replace(/^\/+/, '');
+    const wholeMatch = findBestMatch(await searchFiles(target), ref);
+    if (wholeMatch) {
+      return wholeMatch;
+    }
+    const base = target.split('/').pop() || target;
+    return base === target ? null : findBestMatch(await searchFiles(base), ref);
+  }, [searchFiles]);
   return useCallback(
     (filePath: string, diffInfo?: any, line?: number | null) => {
       // Normalized once and used for every outcome: a reference picked up from
@@ -115,11 +101,10 @@ export function useFileOpenResolver(
         onFileOpen(ref, diffInfo, line);
         return;
       }
-      void loadFiles().then((files) => {
-        const match = findBestMatch(files, ref);
+      void resolveReference(ref).then((match) => {
         onFileOpen(match ?? ref, diffInfo, line);
       });
     },
-    [loadFiles, onFileOpen],
+    [resolveReference, onFileOpen],
   );
 }

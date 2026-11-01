@@ -1335,6 +1335,38 @@ export type FileTreeNode = {
 };
 
 /**
+ * One directory level returned by the lazy File Tree listing.
+ *
+ * `entries` never carry `children`; the browser asks for a folder's contents
+ * when it is expanded. `truncated` is set only when a single directory holds
+ * more entries than the per-directory safety cap.
+ */
+export type FileTreeDirectoryListing = {
+  path: string;
+  entries: FileTreeNode[];
+  truncated: boolean;
+};
+
+/** Input for the server-side project file search. */
+export type FileTreeSearchOptions = {
+  query: string;
+  limit?: number;
+  type?: 'file' | 'directory' | 'any';
+  respectGitignore?: boolean;
+};
+
+/** A search hit: the usual tree node plus its project-relative, `/`-separated path. */
+export type FileTreeSearchResult = FileTreeNode & { relativePath: string };
+
+/**
+ * `truncated` means more matches exist than were returned, or the walk
+ * stopped at its per-request time or entry budget before covering everything.
+ */
+export type FileTreeSearchResponse = {
+  results: FileTreeSearchResult[];
+  truncated: boolean;
+};
+/**
  * Minimal directory-entry shape required during File Tree traversal.
  *
  * Production adapts Node `Dirent` objects to this structural contract. Tests
@@ -1473,10 +1505,14 @@ export type FileTreeServices = {
     path: string;
     message: string;
   }>;
-  listProjectFiles(
+  listDirectory(
     projectId: string,
-    options?: { respectGitignore: boolean },
-  ): Promise<FileTreeNode[]>;
+    options?: { directoryPath?: string; respectGitignore?: boolean },
+  ): Promise<FileTreeDirectoryListing>;
+  searchProjectFiles(
+    projectId: string,
+    options: FileTreeSearchOptions,
+  ): Promise<FileTreeSearchResponse>;
   createEntry(input: {
     projectId: string;
     parentPath: string;

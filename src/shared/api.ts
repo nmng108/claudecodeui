@@ -311,8 +311,29 @@ export const api = {
     get(fileContentPath(projectId, filePath), options),
   saveFile: (projectId: string, filePath: string, content: string) =>
     put(`/api/file-tree/projects/${projectId}/file`, { filePath, content }),
-  getFiles: (projectId: string, options: ApiRequestOptions = {}) =>
-    get(`/api/file-tree/projects/${projectId}/files${query({ respectGitignore: true })}`, options),
+  // One directory level (the project root when `directoryPath` is omitted). The
+  // tree loads a folder's children when the folder is expanded.
+  listFiles: (projectId: string, directoryPath?: string | null, options: ApiRequestOptions = {}) =>
+    get(
+      `/api/file-tree/projects/${projectId}/files${query({ path: directoryPath, respectGitignore: true })}`,
+      options,
+    ),
+  // Server-side search over the whole project, so large workspaces never have
+  // to be loaded into the browser to find a file.
+  searchFiles: (
+    projectId: string,
+    {
+      query: searchText,
+      type,
+      limit,
+      respectGitignore = true,
+    }: { query: string; type?: 'file' | 'directory'; limit?: number; respectGitignore?: boolean },
+    options: ApiRequestOptions = {},
+  ) =>
+    get(
+      `/api/file-tree/projects/${projectId}/files/search${query({ q: searchText, type, limit, respectGitignore })}`,
+      options,
+    ),
 
   // File operations
   createFile: (

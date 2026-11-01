@@ -1,6 +1,6 @@
 import type { TFunction } from 'i18next';
 
-import type { FileTreeNode } from '@/shared/types';
+import type { FileTreeNode, FileTreeSearchHit } from '@/shared/types';
 
 const IMAGE_FILE_EXTENSIONS = new Set([
   'png',
@@ -13,21 +13,60 @@ const IMAGE_FILE_EXTENSIONS = new Set([
   'bmp',
 ]);
 
-export function filterFileTree(items: FileTreeNode[], query: string): FileTreeNode[] {
-  return items.reduce<FileTreeNode[]>((filteredItems, item) => {
-    const matchesName = item.name.toLowerCase().includes(query);
-    const filteredChildren =
-      item.type === 'directory' && item.children ? filterFileTree(item.children, query) : [];
+const compareTreeNodes = (left: FileTreeNode, right: FileTreeNode) => {
+  if (left.type !== right.type) {
+    return left.type === 'directory' ? -1 : 1;
+  }
+  return left.name.localeCompare(right.name);
+};
 
-    if (matchesName || filteredChildren.length > 0) {
-      filteredItems.push({
-        ...item,
-        children: filteredChildren,
-      });
+/**
+ * Arranges flat server search hits into a tree so they render with the usual
+ * folder rows. Folders that only lead to a hit are synthesized from the hit's
+ * relative path; their absolute path is the hit's absolute path with the
+ * trailing segments removed, so the platform's separator never has to be known.
+ */
+export function buildSearchTree(hits: FileTreeSearchHit[]): FileTreeNode[] {
+  const roots: FileTreeNode[] = [];
+  const nodesByPath = new Map<string, FileTreeNode>();
+
+  for (const hit of hits) {
+    const segments = hit.relativePath.split('/').filter(Boolean);
+    const prefixLength = hit.path.length - hit.relativePath.length;
+    if (segments.length === 0 || prefixLength < 1) {
+      continue;
     }
+    const separator = hit.path[prefixLength - 1];
+    const rootPath = hit.path.slice(0, prefixLength - 1);
 
-    return filteredItems;
-  }, []);
+    let siblings = roots;
+    let currentPath = rootPath;
+    segments.forEach((segment, index) => {
+      currentPath = `${currentPath}${separator}${segment}`;
+      const isLast = index === segments.length - 1;
+      let node = nodesByPath.get(currentPath);
+
+      if (!node) {
+        node = isLast
+          ? { ...hit, children: hit.type === 'directory' ? [] : undefined }
+          : { name: segment, type: 'directory', path: currentPath, children: [] };
+        nodesByPath.set(currentPath, node);
+        siblings.push(node);
+      } else if (isLast) {
+        // The folder was created as an ancestor of an earlier hit; fill in its own details.
+        Object.assign(node, hit, { children: node.children });
+      }
+
+      siblings = node.children ?? siblings;
+    });
+  }
+
+  const sortRecursively = (nodes: FileTreeNode[]) => {
+    nodes.sort(compareTreeNodes);
+    nodes.forEach((node) => node.children && sortRecursively(node.children));
+  };
+  sortRecursively(roots);
+  return roots;
 }
 
 // During search we auto-expand every directory present in the filtered subtree.
