@@ -74,6 +74,8 @@ jspm_packages/
 .yarn-integrity
 
 # dotenv environment variables file
+# Docker Compose variables (copy from .env.compose.example); not the app's .env
+.env.compose
 .env.test
 
 # parcel-bundler cache (https://parceljs.org/)

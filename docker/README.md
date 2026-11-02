@@ -212,6 +212,34 @@ The image is built on `node:24-alpine3.24` (musl libc, not glibc):
 
 `HEALTHCHECK` polls `GET /health` on `SERVER_PORT` (default `3001`). `HOST` is fixed to `0.0.0.0` in the image so the server is reachable from outside the container; do not override it to `127.0.0.1` or port publishing will stop working.
 
+## Development image
+
+`docker/dev/Dockerfile` runs the **source tree** of this repository with hot reload, in the same Alpine toolchain as the standard image (Node 24, native build tools, Claude Code, Kiro CLI). It does not install the published package and copies no repository files: the repository is bind-mounted at `/app`.
+
+```bash
+cp .env.compose.example .env.compose      # once: ports, API keys, workspace path
+docker compose --env-file .env.compose -f docker-compose.dev.yml up --build
+```
+
+Compose variables live in `.env.compose`, not `.env`: the app reads a `.env` at the repository root, and the dev container sees that file through its bind mount. `.env.compose` is git-ignored; export `COMPOSE_ENV_FILES=.env.compose` to skip the `--env-file` flag. The same file also works for the standard stack (`docker compose --env-file .env.compose up --build`).
+
+- UI with HMR: **http://localhost:5173** (Vite). API and WebSocket server: http://localhost:3001.
+- `npm run server:dev-watch` (restarts the API on server changes) and `npm run client` (Vite) run under `concurrently`.
+- `node_modules` lives in the `dev-node-modules` volume, built inside the container for Linux/musl; the host's `node_modules` is shadowed and never used. `docker/dev/dev-entrypoint.mjs` runs `npm install` on the first start and whenever `package.json` or `package-lock.json` change, and restores `package-lock.json` if npm rewrote it.
+- npm's download cache is the `dev-npm-cache` volume, so recreating the container (`down` then `up`) does not download packages again. A new or changed dependency is installed on top of the existing `node_modules`; only deleting the volumes (`down -v`) causes a full install.
+- `HUSKY=0` is set so the `prepare` script does not change the host repository's git hooks path.
+- The dev stack has its own `dev-*` volumes, so it never shares the auth DB or CLI credentials with the standard stack. Both stacks use ports 3001/5173 by default; override with `DEV_UI_PORT` / `DEV_SERVER_PORT`.
+
+Variables for `docker-compose.dev.yml` (see `.env.compose.example`):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WORKSPACE_PATH` | `./` | Host folder mounted at `/workspace` for the projects you open in the UI |
+| `VITE_USE_POLLING` | `false` | Set `true` if host edits do not reload the page (bind mounts from Windows/macOS may not deliver file-change events) |
+| `DEV_UI_PORT` / `DEV_SERVER_PORT` | `5173` / `3001` | Host ports |
+| `KIRO_API_KEY`, `ANTHROPIC_API_KEY` | empty | Passed through as in the standard stack |
+
+`tsx watch` has no polling mode, so on a bind mount that does not deliver events, restart the container to pick up server-side changes.
 ## Links
 
 - [CloudCLI Cloud](https://cloudcli.ai) — fully managed, no setup required

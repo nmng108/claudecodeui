@@ -1,0 +1,45 @@
+# Development stack: runs the source in this repository with hot reload.
+#   cp .env.compose.example .env.compose        (once; holds ports, keys, paths)
+#   docker compose --env-file .env.compose -f docker-compose.dev.yml up --build
+# UI (Vite, HMR): http://localhost:5173   API/WebSocket server: http://localhost:3001
+# For the published-package image use docker-compose.yml instead.
+services:
+  cloudcli-dev:
+    build:
+      context: ./docker
+      dockerfile: dev/Dockerfile
+    image: cloudcli:dev
+    container_name: cloudcli-dev
+    ports:
+      - '${DEV_UI_PORT:-5173}:5173'
+      - '${DEV_SERVER_PORT:-3001}:3001'
+    environment:
+      HOST: 0.0.0.0
+      SERVER_PORT: 3001
+      VITE_PORT: 5173
+      # Set to true when edits on the host do not trigger a reload (bind mounts
+      # from Windows or macOS do not always deliver file-change events).
+      VITE_USE_POLLING: ${VITE_USE_POLLING:-false}
+      KIRO_API_KEY: ${KIRO_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      # The source tree being developed.
+      - .:/app
+      # Dependencies built for this container (Linux/musl); shadows the host's node_modules.
+      - dev-node-modules:/app/node_modules
+      # npm's download cache, so a recreated container does not download packages again.
+      - dev-npm-cache:/home/agent/.npm
+      # Project files the agent reads/writes.
+      - ${WORKSPACE_PATH:-./}:/workspace
+      # Separate from the standard stack's volumes so the two never share an auth DB.
+      - dev-claude-home:/home/agent/.claude
+      - dev-kiro-home:/home/agent/.kiro
+      - dev-cloudcli-home:/home/agent/.cloudcli
+    restart: unless-stopped
+
+volumes:
+  dev-node-modules:
+  dev-npm-cache:
+  dev-claude-home:
+  dev-kiro-home:
+  dev-cloudcli-home:
