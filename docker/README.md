@@ -208,6 +208,15 @@ The image is built on `node:24-alpine3.24` (musl libc, not glibc):
 - **Claude Code**: its bundled `ripgrep` binary is glibc-linked and fails to load on musl. The image sets `USE_BUILTIN_RIPGREP=0` and installs the `ripgrep` apk package so Claude Code shells out to the system `rg` instead.
 - **Native npm modules** (`node-pty`, `better-sqlite3`, `bcrypt`): built from source against musl using the `build-base`/`python3` apk packages; no prebuilt glibc binaries are used.
 
+### Language runtimes (mise)
+
+Both images include [mise](https://mise.jdx.dev), so agents and you can run Java, Python and other languages inside the container. The set installed at build time is listed in **`docker/mise.toml`** (copied to `/mise/config.toml`, mise's global config): Java Temurin 21 (default), 8 and 25, and the latest Python. Node.js comes from the base image; mise is told not to manage it.
+
+- Alpine is kept as the base: mise is a static binary that detects musl at run time and downloads musl builds (Temurin `alpine-linux`, Node `musl`). `all_compile = false` and `python.compile = false` in `mise.toml` keep it on prebuilt binaries, so no compiler toolchain is involved. The image build runs `mise install` and fails if a tool cannot be installed.
+- `java`, `python`, ... are shims on `PATH` (`/mise/shims`), so they work in non-interactive shells without `mise activate`.
+- Add a runtime: edit `docker/mise.toml` and rebuild, or run `mise use -g go@1.23` in a running container. A project's own `mise.toml` or `.tool-versions` overrides the global versions in its directory. Pick another version for one command with `mise exec java@temurin-8 -- java -version`.
+- The dev stack keeps `/mise` in the `dev-mise-data` volume (about 1.4 GB with the default set) and runs `mise install` on start, so edits to `docker/mise.toml` apply without a rebuild. In the standard image the runtimes are part of the image; ones added at run time are lost when the container is recreated.
+- Tools with no musl build still fail on Alpine; the fix is then an apk package or a glibc base for that image.
 ### Health & readiness
 
 `HEALTHCHECK` polls `GET /health` on `SERVER_PORT` (default `3001`). `HOST` is fixed to `0.0.0.0` in the image so the server is reachable from outside the container; do not override it to `127.0.0.1` or port publishing will stop working.
@@ -240,6 +249,7 @@ Variables for `docker-compose.dev.yml` (see `.env.compose.example`):
 | `KIRO_API_KEY`, `ANTHROPIC_API_KEY` | empty | Passed through as in the standard stack |
 
 `tsx watch` has no polling mode, so on a bind mount that does not deliver events, restart the container to pick up server-side changes.
+
 ## Links
 
 - [CloudCLI Cloud](https://cloudcli.ai) — fully managed, no setup required

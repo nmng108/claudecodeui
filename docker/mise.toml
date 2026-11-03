@@ -1,0 +1,25 @@
+# Language runtimes installed into every CloudCLI image (dev and standard) by
+# mise (https://mise.jdx.dev). Copied to /mise/config.toml, mise's global
+# config, so it applies in every directory, including /workspace projects.
+#
+# Add a line here and rebuild to bake another runtime into the image. Inside a
+# running container, `mise use -g <tool>@<version>` installs more (the dev
+# stack keeps them in the dev-mise-data volume). A project's own mise.toml or
+# .tool-versions overrides these versions for that directory.
+#
+# When several versions of a tool are listed, the first one is the default;
+# pick another with `mise exec java@temurin-8 -- java -version` or in a
+# project's mise.toml.
+
+[settings]
+# The images are Alpine (musl). Use prebuilt musl binaries; never compile from
+# source (that needs a full toolchain and takes minutes).
+all_compile = false
+python.compile = false
+# Node.js is provided by the base image (the app itself runs on it); mise must
+# not install or shim a second copy.
+disable_tools = ["node"]
+
+[tools]
+python = "latest"
+java = ["temurin-21", "temurin-8", "temurin-25"]

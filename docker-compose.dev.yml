@@ -35,6 +35,8 @@ services:
       - dev-claude-home:/home/agent/.claude
       - dev-kiro-home:/home/agent/.kiro
       - dev-cloudcli-home:/home/agent/.cloudcli
+      # Language runtimes (docker/mise.toml) plus any added with `mise use -g`
+      - dev-mise-data:/mise
     restart: unless-stopped
 
 volumes:
@@ -43,3 +45,4 @@ volumes:
   dev-claude-home:
   dev-kiro-home:
   dev-cloudcli-home:
+  dev-mise-data:

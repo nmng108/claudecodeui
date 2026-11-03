@@ -4,6 +4,9 @@
 # Build context must be docker/ (same convention as docker/claude-code and
 # docker/codex), e.g.:
 #   docker build -f docker/standard/Dockerfile -t cloudcli:standard docker/
+ARG MISE_VERSION=2026.11.0
+# Static musl binary; mise picks musl or glibc builds of each tool at run time.
+FROM ghcr.io/jdx/mise:${MISE_VERSION} AS mise
 FROM node:24-alpine3.24
 
 # ---------------------------------------------------------------------------
@@ -77,12 +80,21 @@ RUN --mount=type=cache,target=/tmp/npm-cache,sharing=locked,mode=0777 \
 # Claude Code and CloudCLI are both installed above as root. Kiro CLI is
 # installed below as `agent` into a per-user npm prefix / $HOME/.local/bin,
 # so no further ownership changes to shared system paths are needed.
+# mise: language version manager (see docker/mise.toml for the installed set).
+# /mise holds its data and config; shims on PATH make `java`, `python`, ... work
+# in non-interactive shells (agents, scripts) without `mise activate`.
+COPY --from=mise /usr/local/bin/mise /usr/local/bin/mise
+ENV MISE_DATA_DIR=/mise \
+    MISE_CONFIG_DIR=/mise \
+    MISE_CACHE_DIR=/mise/cache \
+    MISE_YES=1 \
+    PATH="/mise/shims:${PATH}"
 RUN deluser node 2>/dev/null || true; \
     delgroup node 2>/dev/null || true; \
     addgroup -g 1000 agent && \
     adduser -D -u 1000 -G agent -h /home/agent -s /bin/bash agent && \
-    mkdir -p /workspace && \
-    chown -R agent:agent /workspace /home/agent
+    mkdir -p /workspace /mise /home/agent/.claude /home/agent/.kiro /home/agent/.cloudcli && \
+    chown -R agent:agent /workspace /mise /home/agent
 
 # ---------------------------------------------------------------------------
 # Kiro CLI (official installer, musl build auto-detected)
@@ -101,6 +113,11 @@ RUN curl -fsSL https://cli.kiro.dev/install | bash && \
     claude --version && \
     cloudcli --version
 
+# Language runtimes from docker/mise.toml, installed as `agent` so the agent
+# can add more at run time. Placed last because it is the slowest layer; it is
+# rebuilt only when mise.toml changes.
+COPY --chown=agent:agent mise.toml /mise/config.toml
+RUN mise install && mise ls
 # ---------------------------------------------------------------------------
 # Runtime
 # ---------------------------------------------------------------------------
