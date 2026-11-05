@@ -8,6 +8,10 @@ services:
     build:
       context: ./docker
       dockerfile: dev/Dockerfile
+      args:
+        ALPINE_VERSION: ${ALPINE_VERSION:-3.24}
+        AGENT_UID: ${AGENT_UID:-1000}
+        AGENT_GID: ${AGENT_GID:-1000}
     image: cloudcli:dev
     container_name: cloudcli-dev
     ports:
@@ -17,11 +21,17 @@ services:
       HOST: 0.0.0.0
       SERVER_PORT: 3001
       VITE_PORT: 5173
+      # Workspaces must live under this root (default: the home dir, /home/agent),
+      # so point it at the mounted projects folder.
+      WORKSPACES_ROOT: /workspace
       # Set to true when edits on the host do not trigger a reload (bind mounts
       # from Windows or macOS do not always deliver file-change events).
       VITE_USE_POLLING: ${VITE_USE_POLLING:-false}
       KIRO_API_KEY: ${KIRO_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Kiro CLI engine: v3 (default) or v2. The v3 engine downloads a glibc-linked
+      # Node that cannot run on this Alpine/musl image; set v2 to work around it.
+      CLOUDCLI_KIRO_ENGINE: ${CLOUDCLI_KIRO_ENGINE:-v3}
     volumes:
       # The source tree being developed.
       - .:/app

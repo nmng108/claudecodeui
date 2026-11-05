@@ -10,9 +10,19 @@
 #   docker build -f docker/dev/Dockerfile -t cloudcli:dev docker/
 # Normally started through docker-compose.dev.yml at the repository root.
 ARG MISE_VERSION=2026.11.0
+# Alpine release of the Node base image. Hosts whose libseccomp is too old to know
+# the `pwritev2` syscall (e.g. CentOS 7, libseccomp 2.3.x) fail every SQLite write
+# with "disk I/O error" on Alpine 3.24 (musl uses pwritev2); use 3.23 there.
+ARG ALPINE_VERSION=3.24
 # Static musl binary; mise picks musl or glibc builds of each tool at run time.
 FROM ghcr.io/jdx/mise:${MISE_VERSION} AS mise
-FROM node:24-alpine3.24
+FROM node:24-alpine${ALPINE_VERSION}
+
+# uid/gid of the `agent` user. The bind-mounted repository and workspace keep
+# the host's ownership, so these must match the host user (`id -u`, `id -g`)
+# or the container cannot write to them (EACCES). 1000 is the common default.
+ARG AGENT_UID=1000
+ARG AGENT_GID=1000
 
 # Same toolchain as docker/standard/Dockerfile, so a bug seen here is a bug in
 # the shipped image too (see that file for why each package is needed).
@@ -57,8 +67,8 @@ ENV MISE_DATA_DIR=/mise \
     PATH="/mise/shims:${PATH}"
 RUN deluser node 2>/dev/null || true; \
     delgroup node 2>/dev/null || true; \
-    addgroup -g 1000 agent && \
-    adduser -D -u 1000 -G agent -h /home/agent -s /bin/bash agent && \
+    addgroup -g "${AGENT_GID}" agent && \
+    adduser -D -u "${AGENT_UID}" -G agent -h /home/agent -s /bin/bash agent && \
     mkdir -p /workspace /mise /app/node_modules /home/agent/.npm \
         /home/agent/.claude /home/agent/.kiro /home/agent/.cloudcli && \
     chown -R agent:agent /workspace /mise /app /home/agent
