@@ -1,11 +1,15 @@
 # Language runtimes installed into every CloudCLI image (dev and standard) by
-# mise (https://mise.jdx.dev). Copied to /mise/config.toml, mise's global
-# config, so it applies in every directory, including /workspace projects.
+# mise (https://mise.jdx.dev). Copied into the image as /etc/mise/config.toml,
+# mise's system config, so it applies in every directory, including /workspace
+# projects. The runtimes are installed at container start (not at build time)
+# into the /mise volume. A version removed from this list is uninstalled at the
+# next start, unless a user's own config requests it; tools users installed
+# themselves are never touched.
 #
-# Add a line here and rebuild to bake another runtime into the image. Inside a
-# running container, `mise use -g <tool>@<version>` installs more (the dev
-# stack keeps them in the dev-mise-data volume). A project's own mise.toml or
-# .tool-versions overrides these versions for that directory.
+# Add a line here and rebuild (the dev stack needs only a restart) to install
+# another runtime. Inside a running container, `mise use -g <tool>@<version>`
+# installs more for the user and keeps them across rebuilds. A project's own
+# mise.toml or .tool-versions overrides these versions for that directory.
 #
 # When several versions of a tool are listed, the first one is the default;
 # pick another with `mise exec java@temurin-8 -- java -version` or in a

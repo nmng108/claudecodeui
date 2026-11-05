@@ -199,6 +199,7 @@ No keys are baked into the image. Pass them at `docker run`/`compose up` time as
 | `claude-home` | `/home/agent/.claude` | Claude Code sessions/config |
 | `kiro-home` | `/home/agent/.kiro` | Kiro CLI sessions/config |
 | `cloudcli-home` | `/home/agent/.cloudcli` | CloudCLI auth DB and stored API keys |
+| `mise-data` | `/mise` | Language runtimes installed by mise (see below) |
 
 ### musl (Alpine) caveat
 
@@ -210,13 +211,22 @@ The image is built on `node:24-alpine3.24` (musl libc, not glibc):
 
 ### Language runtimes (mise)
 
-Both images include [mise](https://mise.jdx.dev), so agents and you can run Java, Python and other languages inside the container. The set installed at build time is listed in **`docker/mise.toml`** (copied to `/mise/config.toml`, mise's global config): Java Temurin 21 (default), 8 and 25, and the latest Python. Node.js comes from the base image; mise is told not to manage it.
+Both images include [mise](https://mise.jdx.dev), so agents and you can run Java, Python and other languages inside the container. The list of runtimes the app ships with is **`docker/mise.toml`**, copied into the image as `/etc/mise/config.toml` (mise's system config): Java Temurin 21 (default), 8 and 25, and the latest Python. Node.js comes from the base image; mise is told not to manage it.
 
-- Alpine is kept as the base: mise is a static binary that detects musl at run time and downloads musl builds (Temurin `alpine-linux`, Node `musl`). `all_compile = false` and `python.compile = false` in `mise.toml` keep it on prebuilt binaries, so no compiler toolchain is involved. The image build runs `mise install` and fails if a tool cannot be installed.
-- `java`, `python`, ... are shims on `PATH` (`/mise/shims`), so they work in non-interactive shells without `mise activate`.
-- Add a runtime: edit `docker/mise.toml` and rebuild, or run `mise use -g go@1.23` in a running container. A project's own `mise.toml` or `.tool-versions` overrides the global versions in its directory. Pick another version for one command with `mise exec java@temurin-8 -- java -version`.
-- The dev stack keeps `/mise` in the `dev-mise-data` volume (about 1.4 GB with the default set) and runs `mise install` on start, so edits to `docker/mise.toml` apply without a rebuild. In the standard image the runtimes are part of the image; ones added at run time are lost when the container is recreated.
-- Tools with no musl build still fail on Alpine; the fix is then an apk package or a glibc base for that image.
+**Runtimes are installed when the container starts, not when the image is built.** `docker/shared/mise-sync.mjs` runs first (before the app) and installs into `/mise`, which must be a volume (`mise-data` in `docker-compose.yml`, `dev-mise-data` in `docker-compose.dev.yml`). The first start downloads everything (about 1.5 minutes for the default set); later starts finish in milliseconds.
+
+- **What stays when you update the app.** Rebuilding the image or changing an earlier Dockerfile step never reinstalls anything, because nothing is baked in. Edit `docker/mise.toml` and rebuild (`up --build`; the image build takes seconds) and only the added or changed tools are installed at the next start.
+- **What users and agents install stays too.** `mise use -g go@1.23` writes to the user config in the volume (`/mise/config.toml`) and installs into the volume. The image's list is a separate file, so the two never overwrite each other.
+- **Removing a language.** Delete it from `docker/mise.toml`: at the next start, versions the image's list installed earlier (recorded in `/mise/.managed-tools.json`) and no longer asks for are uninstalled. A version is kept if the user's config requests it. Versions that only a user installed were never recorded and are never removed. A tool listed as `latest` follows the same rule: when a newer release appears, the previous one is pruned.
+- **No network.** A failed install is logged as a warning and the app still starts, just without the missing runtimes.
+- **Download cache.** `/mise/cache` (about 0.5 GB for the default set) is kept in the same volume, so putting a removed tool back does not download it again. `mise cache clear` empties it.
+- **Alpine is the base.** mise is a static binary that detects musl at run time and downloads musl builds (Temurin `alpine-linux`, Node `musl`). `all_compile = false` and `python.compile = false` in `mise.toml` keep it on prebuilt binaries, so no compiler toolchain is involved. A tool with no musl build still fails on Alpine; the fix is then an apk package.
+- Shims on `PATH` (`/mise/shims`) make `java`, `python`, ... work in non-interactive shells without `mise activate`. A project's own `mise.toml` or `.tool-versions` overrides the versions in its directory; pick another version for one command with `mise exec java@temurin-8 -- java -version`.
+- Start over with `docker compose down -v` (removes all volumes) or `docker volume rm <project>_mise-data`.
+
+### Kiro CLI version
+
+The images install Kiro CLI 2.37.1 (`KIRO_CLI_VERSION` build argument). The installer's default became 3.0.0, whose Alpine archive fails its own glibc check during installation, so the version is pinned to the release this integration was tested on.
 ### Health & readiness
 
 `HEALTHCHECK` polls `GET /health` on `SERVER_PORT` (default `3001`). `HOST` is fixed to `0.0.0.0` in the image so the server is reachable from outside the container; do not override it to `127.0.0.1` or port publishing will stop working.

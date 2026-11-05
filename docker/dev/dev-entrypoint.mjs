@@ -41,14 +41,11 @@ function installDependencies() {
   }
 }
 
-// The language runtimes were installed at image build time into the dev-mise-data
-// volume, so a changed docker/mise.toml is picked up here without a rebuild
-// (a no-op when everything is already installed). A failure does not stop the app.
-const mise = spawnSync('mise', ['install'], { stdio: 'inherit' });
-if (mise.status !== 0) {
-  console.warn('[dev] mise install failed; continuing without the missing runtimes.');
-}
-
+// Install the language runtimes listed in docker/mise.toml into the /mise volume
+// and remove ones that were dropped from the list (see docker/shared/mise-sync.mjs).
+// Read from the repository, so editing either file applies on the next start with
+// no rebuild. A failure (for example no network) never stops the app.
+spawnSync(process.execPath, ['docker/shared/mise-sync.mjs'], { stdio: 'inherit' });
 const expectedHash = dependenciesHash();
 if (readIfExists(STAMP) !== expectedHash) {
   installDependencies();

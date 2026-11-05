@@ -40,10 +40,16 @@ RUN npm install -g @anthropic-ai/claude-code && \
 # node:24-alpine ships a `node` user at uid/gid 1000; rename it to `agent` like
 # the other images. /app/node_modules and ~/.npm are created here so the named
 # volumes mounted over them start out owned by `agent`.
-# mise: language version manager (see docker/mise.toml for the installed set).
-# /mise holds its data and config; shims on PATH make `java`, `python`, ... work
-# in non-interactive shells (agents, scripts) without `mise activate`.
+# mise: language version manager. The language list (docker/mise.toml) is part
+# of the image at /etc/mise/config.toml; the runtimes themselves are NOT baked
+# in. They are installed into /mise at container start by mise-sync.mjs, so
+# /mise is meant to be a volume: it keeps what users and agents install
+# (`mise use -g`), and a rebuild or a changed list never reinstalls everything.
+# Shims on PATH make `java`, `python`, ... work in non-interactive shells
+# without `mise activate`.
 COPY --from=mise /usr/local/bin/mise /usr/local/bin/mise
+COPY mise.toml /etc/mise/config.toml
+COPY shared/mise-sync.mjs /usr/local/lib/cloudcli/mise-sync.mjs
 ENV MISE_DATA_DIR=/mise \
     MISE_CONFIG_DIR=/mise \
     MISE_CACHE_DIR=/mise/cache \
@@ -60,14 +66,13 @@ RUN deluser node 2>/dev/null || true; \
 USER agent
 WORKDIR /home/agent
 ENV PATH="/home/agent/.local/bin:${PATH}"
-RUN curl -fsSL https://cli.kiro.dev/install | bash && \
+# Pinned: the installer's default (latest) became 3.0.0, whose Alpine/musl
+# archive fails its own glibc check during install ("Could not determine glibc
+# version"). 2.37.1 is the release this integration was built and tested on.
+ARG KIRO_CLI_VERSION=2.37.1
+RUN curl -fsSL https://cli.kiro.dev/install | bash -s -- --version "${KIRO_CLI_VERSION}" && \
     kiro-cli --version
 
-# Language runtimes from docker/mise.toml, installed as `agent` so the agent
-# can add more at run time. Placed last because it is the slowest layer; it is
-# rebuilt only when mise.toml changes.
-COPY --chown=agent:agent mise.toml /mise/config.toml
-RUN mise install && mise ls
 # The bind-mounted repository is owned by the host user, not by `agent`, and
 # git refuses such repositories ("dubious ownership") without this.
 RUN git config --global --add safe.directory '*'
