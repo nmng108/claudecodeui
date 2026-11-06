@@ -17,6 +17,8 @@
  * - `permission`       - requests permission mid-turn; replies according to
  *                        the client's decision (`end_turn` on allow,
  *                        `cancelled` stop reason when the client cancels).
+ * - `thought-chunks`   - streams three thoughts as many tiny agent_thought_chunk
+ *                        updates around a tool call and an answer chunk.
  * - `cancel`           - never resolves the prompt on its own; waits for
  *                        `session/cancel` and then resolves with
  *                        `stopReason: 'cancelled'`.
@@ -287,6 +289,46 @@ const connection = new AgentSideConnection((_client) => ({
         { type: 'assistant', operationType: 'Say', content: 'permission allowed, ran it' },
         { type: 'usage_summary', promptTurnSummaries: [{ unit: 'credit', unitPlural: 'credits', usage: 0.1 }] },
       ]);
+      return { stopReason: 'end_turn' };
+    }
+
+    if (scenario === 'thought-chunks') {
+      // Real Kiro streams a thought as many tiny chunks. Three thoughts: one broken
+      // up by a usage update, one after a tool result, and one that is the last
+      // thing in the turn.
+      const thought = async (pieces: string[]) => {
+        for (const text of pieces) {
+          await connection.sessionUpdate({
+            sessionId,
+            update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text } },
+          });
+        }
+      };
+      await thought(['I ', 'should ', 'list ']);
+      if (isV3) {
+        await connection.sessionUpdate({
+          sessionId,
+          update: {
+            sessionUpdate: 'session_info_update',
+            _meta: { kiro: { kind: 'context_usage', usagePercentage: 3, contextUsage: { usagePercentage: 3 } } },
+          },
+        });
+      }
+      await thought(['the ', 'files ', 'first.']);
+      await connection.sessionUpdate({
+        sessionId,
+        update: { sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'List files', kind: 'execute', status: 'pending', rawInput: { command: 'ls' } },
+      });
+      await connection.sessionUpdate({
+        sessionId,
+        update: { sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'completed', rawOutput: 'a.txt' },
+      });
+      await thought(['The ', 'listing ', 'is ', 'done.']);
+      await connection.sessionUpdate({
+        sessionId,
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Done.' } },
+      });
+      await thought(['Nothing ', 'else ', 'to do.']);
       return { stopReason: 'end_turn' };
     }
 

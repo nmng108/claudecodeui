@@ -161,6 +161,22 @@ async function runKiro(command, options = {}, ws, context) {
     }));
   };
 
+  // Kiro streams a thought as many tiny chunks (1-30 characters each). The UI
+  // renders every `thinking` message as its own block, so sending one message per
+  // chunk shreds a single thought into dozens of blocks. Chunks are joined here
+  // and sent as one message when the thought ends: the next tool call, tool
+  // result, answer text or permission request, or the end of the turn. Usage and
+  // status updates can arrive in the middle of a thought and do not end it.
+  let pendingThought = '';
+  const flushThought = () => {
+    if (!pendingThought) {
+      return;
+    }
+    const content = pendingThought;
+    pendingThought = '';
+    ws.send(createNormalizedMessage({ kind: 'thinking', content, sessionId: capturedSessionId || sessionId || null, provider: 'kiro' }));
+  };
+
   try {
     client = new KiroAcpClient({
       cwd: workingDirectory,
@@ -172,15 +188,17 @@ async function runKiro(command, options = {}, ws, context) {
           switch (event.type) {
             case 'agent_message_chunk':
               if (event.isThought) {
-                ws.send(createNormalizedMessage({ kind: 'thinking', content: event.text, sessionId: activeSessionId, provider: 'kiro' }));
+                pendingThought += event.text;
               } else {
+                flushThought();
                 ws.send(createNormalizedMessage({ kind: 'stream_delta', content: event.text, sessionId: activeSessionId, provider: 'kiro' }));
               }
               break;
             case 'agent_thought_chunk':
-              ws.send(createNormalizedMessage({ kind: 'thinking', content: event.text, sessionId: activeSessionId, provider: 'kiro' }));
+              pendingThought += event.text;
               break;
             case 'tool_call':
+              flushThought();
               ws.send(createNormalizedMessage({
                 kind: 'tool_use',
                 toolId: event.toolCallId,
@@ -196,6 +214,7 @@ async function runKiro(command, options = {}, ws, context) {
               // Only a finished tool has a result; pending/in_progress updates are progress.
               const result = buildKiroToolResult(event);
               if (result) {
+                flushThought();
                 ws.send(createNormalizedMessage({
                   kind: 'tool_result',
                   toolId: event.toolCallId,
@@ -225,12 +244,15 @@ async function runKiro(command, options = {}, ws, context) {
                 sendUsage(activeSessionId);
               }
               break;
-            case 'plan':              // No dedicated normalized "plan" message kind exists yet app-wide;
+            case 'plan':
+              flushThought();
+              // No dedicated normalized "plan" message kind exists yet app-wide;
               // riding on `status` (like Codex/Claude's `token_budget`) keeps this
               // forward-compatible without adding a MessageKind this task doesn't own.
               ws.send(createNormalizedMessage({ kind: 'status', text: 'plan', entries: event.entries, sessionId: activeSessionId, provider: 'kiro' }));
               break;
             case 'tool_call_chunk':
+              flushThought();
               ws.send(createNormalizedMessage({
                 kind: 'tool_use',
                 toolId: event.toolCallId || generateMessageId('kiro_chunk'),
@@ -270,6 +292,7 @@ async function runKiro(command, options = {}, ws, context) {
         },
         onPermissionRequest: async (event) => {
           const activeSessionId = capturedSessionId || sessionId || null;
+          flushThought();
 
           if (shouldAutoApproveKiroPermission(permissionMode, event.capability)) {
             const allowOption = event.options.find((option) => option.kind === 'allow_once' || option.kind === 'allow_always');
@@ -437,6 +460,8 @@ async function runKiro(command, options = {}, ws, context) {
 
     const promptText = buildKiroPromptText(command, images, files);
     const { stopReason } = await client.prompt(promptText);
+    // A turn can end on a thought (for example when it is cancelled); send what was streamed.
+    flushThought();
 
     ws.send(createNormalizedMessage({ kind: 'status', text: 'stop_reason', stopReason, sessionId: capturedSessionId || sessionId || null, provider: 'kiro' }));
 
@@ -456,6 +481,7 @@ async function runKiro(command, options = {}, ws, context) {
 
     void initializeResponse; // available for future capability checks (T5/T6)
   } catch (error) {
+    flushThought();
     const session = activeKiroSessions.get(mapKey());
     const wasAborted = aborted || session?.status === 'aborted';
 

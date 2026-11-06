@@ -110,6 +110,31 @@ test('Kiro runtime streams message, thought, tool call and result, then complete
   });
 });
 
+test('Kiro runtime joins streamed thought chunks into one thinking message per thought', async () => {
+  await withFakeCli('thought-chunks', async ({ dir, messages, ws }) => {
+    await kiroRuntime.run('hello', { cwd: dir, sessionId: 'app-thought' }, ws, makeContext());
+
+    // Order matters: each thought ends at the next tool call, answer text or the end of the turn,
+    // and the usage update in the middle of the first thought must not split it.
+    const sequence = messages
+      .filter((m) => ['thinking', 'tool_use', 'tool_result', 'stream_delta'].includes(m.kind))
+      .map((m) => (m.kind === 'thinking' || m.kind === 'stream_delta' ? `${m.kind}:${m.content}` : m.kind));
+    assert.deepEqual(sequence, [
+      'thinking:I should list the files first.',
+      'tool_use',
+      'tool_result',
+      'thinking:The listing is done.',
+      'stream_delta:Done.',
+      'thinking:Nothing else to do.',
+    ]);
+    // The last thought is sent before the turn is reported finished.
+    const kinds = messages.map((m) => m.kind);
+    const lastThought = kinds.lastIndexOf('thinking');
+    const complete = kinds.indexOf('complete');
+    assert.ok(lastThought !== -1 && lastThought < complete);
+  });
+});
+
 for (const [label, allow, expected] of [['allow', true, 'permission allowed, ran it'], ['deny', false, 'permission denied']] as const) {
   test(`Kiro runtime permission round trip: ${label}`, async () => {
     await withFakeCli('permission', async ({ dir, messages, ws }) => {
