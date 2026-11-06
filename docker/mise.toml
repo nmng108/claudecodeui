@@ -16,8 +16,8 @@
 # project's mise.toml.
 
 [settings]
-# The images are Alpine (musl). Use prebuilt musl binaries; never compile from
-# source (that needs a full toolchain and takes minutes).
+# Use prebuilt binaries; never compile from source (that needs a full
+# toolchain and takes minutes).
 all_compile = false
 python.compile = false
 # Node.js is provided by the base image (the app itself runs on it); mise must

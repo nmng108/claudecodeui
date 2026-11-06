@@ -33,7 +33,7 @@ services:
     volumes:
       # The source tree being developed.
       - .:/app
-      # Dependencies built for this container (Linux/musl); shadows the host's node_modules.
+      # Dependencies built for this container (Linux/glibc); shadows the host's node_modules.
       - dev-node-modules:/app/node_modules
       # npm's download cache, so a recreated container does not download packages again.
       - dev-npm-cache:/home/agent/.npm

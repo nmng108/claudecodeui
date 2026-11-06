@@ -1,7 +1,7 @@
 # Docker Compose shortcuts for the development stack.
 # Shell aliases (like dcp) are not visible to make, so the command is set here.
-# Override if needed, e.g. `make up DC="docker compose"`.
-DC       ?= sudo docker compose
+# Override if docker needs sudo, e.g. `make up DC="sudo docker compose"`.
+DC       ?= docker compose
 ENV_FILE ?= .env.compose
 COMPOSE  := $(DC) --env-file $(ENV_FILE) -f docker-compose.dev.yml
 

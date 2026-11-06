@@ -123,7 +123,7 @@ docker run -p 3001:3001 -v $(pwd):/workspace \
   cloudcli:standard
 ```
 
-See [docker/README.md](docker/README.md#standard-non-sandbox-image) for volumes, API key handling and an Alpine/musl compatibility note.
+See [docker/README.md](docker/README.md#standard-non-sandbox-image) for volumes, API key handling and the Debian (glibc) base image rationale.
 
 To develop CloudCLI itself in a container, with the source bind-mounted and hot reload, use the development stack: `docker compose --env-file .env.compose -f docker-compose.dev.yml up --build` after copying `.env.compose.example` to `.env.compose` (see [docker/README.md](docker/README.md#development-image)).
 

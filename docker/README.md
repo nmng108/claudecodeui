@@ -201,14 +201,12 @@ No keys are baked into the image. Pass them at `docker run`/`compose up` time as
 | `cloudcli-home` | `/home/agent/.cloudcli` | CloudCLI auth DB and stored API keys |
 | `mise-data` | `/mise` | Language runtimes installed by mise (see below) |
 
-### musl (Alpine) caveat
+### Base image: Debian (glibc), not Alpine
 
-The image is built on `node:24-alpine3.24` (musl libc, not glibc):
+Both the standard and the dev image are built on `node:24-bookworm-slim`. Alpine (musl) was tried first and does not work for Kiro: the Kiro CLI v3 engine (the default) downloads a glibc-linked Node binary into `~/.local/share/kiro-cli/` that cannot start on musl, even with `gcompat` ("failed to spawn the v3 engine"). Debian also lets mise install the standard prebuilt runtimes and works on older hosts (for example CentOS 7, whose old libseccomp breaks Alpine 3.24's musl).
 
-- **Kiro CLI**: the official installer (`curl -fsSL https://cli.kiro.dev/install | bash`) detects musl automatically (checks `/lib/libc.musl-*.so.1` and `ldd` output) and downloads the musl-native build. No glibc compatibility shim (`gcompat`) is needed. It installs to `~/.local/bin`, which the image adds to `PATH`.
-- **Claude Code**: its bundled `ripgrep` binary is glibc-linked and fails to load on musl. The image sets `USE_BUILTIN_RIPGREP=0` and installs the `ripgrep` apk package so Claude Code shells out to the system `rg` instead.
-- **Native npm modules** (`node-pty`, `better-sqlite3`, `bcrypt`): built from source against musl using the `build-base`/`python3` apk packages; no prebuilt glibc binaries are used.
-
+- `AGENT_UID` / `AGENT_GID` build arguments (default 1000) set the uid/gid of the `agent` user. Match them to the host user (`id -u`, `id -g`) when `/workspace` is a bind mount, otherwise the container cannot write to it.
+- Native npm modules (`node-pty`, `better-sqlite3`, `bcrypt`) build with `build-essential` and `python3` when no prebuilt binary applies.
 ### Language runtimes (mise)
 
 Both images include [mise](https://mise.jdx.dev), so agents and you can run Java, Python and other languages inside the container. The list of runtimes the app ships with is **`docker/mise.toml`**, copied into the image as `/etc/mise/config.toml` (mise's system config): Java Temurin 21 (default), 8 and 25, and the latest Python. Node.js comes from the base image; mise is told not to manage it.
@@ -220,20 +218,20 @@ Both images include [mise](https://mise.jdx.dev), so agents and you can run Java
 - **Removing a language.** Delete it from `docker/mise.toml`: at the next start, versions the image's list installed earlier (recorded in `/mise/.managed-tools.json`) and no longer asks for are uninstalled. A version is kept if the user's config requests it. Versions that only a user installed were never recorded and are never removed. A tool listed as `latest` follows the same rule: when a newer release appears, the previous one is pruned.
 - **No network.** A failed install is logged as a warning and the app still starts, just without the missing runtimes.
 - **Download cache.** `/mise/cache` (about 0.5 GB for the default set) is kept in the same volume, so putting a removed tool back does not download it again. `mise cache clear` empties it.
-- **Alpine is the base.** mise is a static binary that detects musl at run time and downloads musl builds (Temurin `alpine-linux`, Node `musl`). `all_compile = false` and `python.compile = false` in `mise.toml` keep it on prebuilt binaries, so no compiler toolchain is involved. A tool with no musl build still fails on Alpine; the fix is then an apk package.
+- **Prebuilt binaries only.** mise is a static binary that detects the libc at run time. `all_compile = false` and `python.compile = false` in `mise.toml` keep it on prebuilt binaries, so no compiler toolchain is involved for the default set.
 - Shims on `PATH` (`/mise/shims`) make `java`, `python`, ... work in non-interactive shells without `mise activate`. A project's own `mise.toml` or `.tool-versions` overrides the versions in its directory; pick another version for one command with `mise exec java@temurin-8 -- java -version`.
 - Start over with `docker compose down -v` (removes all volumes) or `docker volume rm <project>_mise-data`.
 
 ### Kiro CLI version
 
-The images install Kiro CLI 2.37.1 (`KIRO_CLI_VERSION` build argument). The installer's default became 3.0.0, whose Alpine archive fails its own glibc check during installation, so the version is pinned to the release this integration was tested on.
+The images install Kiro CLI 2.37.1 (`KIRO_CLI_VERSION` build argument). The installer's default moves to newer major versions (it is now 3.0.0), so the version is pinned to the release this integration was tested on.
 ### Health & readiness
 
 `HEALTHCHECK` polls `GET /health` on `SERVER_PORT` (default `3001`). `HOST` is fixed to `0.0.0.0` in the image so the server is reachable from outside the container; do not override it to `127.0.0.1` or port publishing will stop working.
 
 ## Development image
 
-`docker/dev/Dockerfile` runs the **source tree** of this repository with hot reload, on a Debian (glibc) base with Node 24, native build tools, Claude Code and Kiro CLI. Unlike the standard image it is not Alpine: the Kiro CLI v3 engine downloads a glibc-linked Node binary that cannot run on musl. It does not install the published package and copies no repository files: the repository is bind-mounted at `/app`.
+`docker/dev/Dockerfile` runs the **source tree** of this repository with hot reload, on a Debian (glibc) base with Node 24, native build tools, Claude Code and Kiro CLI. It does not install the published package and copies no repository files: the repository is bind-mounted at `/app`.
 
 ```bash
 cp .env.compose.example .env.compose      # once: ports, API keys, workspace path

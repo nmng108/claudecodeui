@@ -1,50 +1,49 @@
 # Standard (non-sandbox) CloudCLI image: Claude Code + Kiro CLI + CloudCLI
-# on a plain node:24-alpine3.24 base, with no Docker-sandbox microVM isolation.
+# on a plain node:24-bookworm-slim (Debian, glibc) base, with no Docker-sandbox
+# microVM isolation.
 #
 # Build context must be docker/ (same convention as docker/claude-code and
 # docker/codex), e.g.:
 #   docker build -f docker/standard/Dockerfile -t cloudcli:standard docker/
 ARG MISE_VERSION=2026.11.0
-# Static musl binary; mise picks musl or glibc builds of each tool at run time.
+# Static binary; works on any libc.
 FROM ghcr.io/jdx/mise:${MISE_VERSION} AS mise
-FROM node:24-alpine3.24
+# Debian (glibc), not Alpine (musl): the Kiro CLI v3 engine downloads a
+# glibc-linked Node binary that cannot run on musl, even with gcompat.
+FROM node:24-bookworm-slim
+
+# uid/gid of the `agent` user. Match them to the host user (`id -u`, `id -g`)
+# when /workspace is a bind mount, or the container cannot write to it.
+ARG AGENT_UID=1000
+ARG AGENT_GID=1000
 
 # ---------------------------------------------------------------------------
 # OS packages
 # ---------------------------------------------------------------------------
-# - bash, curl, git, openssh-client, ca-certificates: general CLI/VCS tooling
-# - build-base, python3: native module builds (node-pty, better-sqlite3, bcrypt)
-# - ripgrep: system `rg` binary — Claude Code's bundled ripgrep is glibc-linked
-#   and fails to load on musl, so USE_BUILTIN_RIPGREP=0 (set below) makes
-#   Claude Code shell out to this package instead.
-# - libgcc, libstdc++: runtime shared libs for prebuilt native addons
-# - jq, sqlite: used by the Kiro installer (jq) and for inspecting the
-#   CloudCLI/auth sqlite database (sqlite)
-# - unzip: required by the Kiro CLI installer to unpack its release archive
+# - build-essential, python3: node-gyp, for native npm modules (node-pty,
+#   better-sqlite3, bcrypt)
+# - ripgrep: used by Claude Code and agents for search
+# - jq, unzip: used by the Kiro CLI installer
+# - sqlite3: for inspecting the CloudCLI/auth sqlite database
 # - tini: proper PID 1 signal handling / zombie reaping for `docker run`
-RUN apk add --no-cache \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
       bash \
+      build-essential \
+      ca-certificates \
       curl \
       git \
+      jq \
       openssh-client \
-      ca-certificates \
-      build-base \
       python3 \
       ripgrep \
-      libgcc \
-      libstdc++ \
-      jq \
-      sqlite \
-      unzip \
-      tini
-
+      sqlite3 \
+      tini \
+      unzip && \
+    rm -rf /var/lib/apt/lists/*
 # ---------------------------------------------------------------------------
 # Claude Code
 # ---------------------------------------------------------------------------
-# USE_BUILTIN_RIPGREP=0: Claude Code ships a glibc-linked ripgrep binary that
-# cannot load on musl (Alpine). This env var makes it use the `rg` binary
-# from the apk package above instead. See apk comment for ripgrep.
-ENV USE_BUILTIN_RIPGREP=0
 RUN npm install -g @anthropic-ai/claude-code && \
     claude --version
 
@@ -71,9 +70,8 @@ RUN --mount=type=cache,target=/tmp/npm-cache,sharing=locked,mode=0777 \
 # ---------------------------------------------------------------------------
 # Non-root user
 # ---------------------------------------------------------------------------
-# node:24-alpine already ships a `node` user at uid/gid 1000. Rename it to
-# `agent` to match the naming used by docker/claude-code and docker/codex,
-# without changing its uid/gid or home directory ownership.
+# node:24-bookworm-slim ships a `node` user at uid/gid 1000. Replace it with
+# `agent` to match the naming used by docker/claude-code and docker/codex.
 #
 # Only /workspace and the user's own $HOME are chowned here — the global npm
 # prefix (/usr/local/lib/node_modules, /usr/local/bin) stays root-owned since
@@ -95,28 +93,25 @@ ENV MISE_DATA_DIR=/mise \
     MISE_CACHE_DIR=/mise/cache \
     MISE_YES=1 \
     PATH="/mise/shims:${PATH}"
-RUN deluser node 2>/dev/null || true; \
-    delgroup node 2>/dev/null || true; \
-    addgroup -g 1000 agent && \
-    adduser -D -u 1000 -G agent -h /home/agent -s /bin/bash agent && \
+RUN userdel -r node 2>/dev/null || true; \
+    groupdel node 2>/dev/null || true; \
+    groupadd -g "${AGENT_GID}" agent && \
+    useradd -m -u "${AGENT_UID}" -g agent -d /home/agent -s /bin/bash agent && \
     mkdir -p /workspace /mise /home/agent/.claude /home/agent/.kiro /home/agent/.cloudcli && \
     chown -R agent:agent /workspace /mise /home/agent
 
 # ---------------------------------------------------------------------------
-# Kiro CLI (official installer, musl build auto-detected)
+# Kiro CLI (official installer)
 # ---------------------------------------------------------------------------
-# The installer at https://cli.kiro.dev/install detects musl libc (via
-# /lib/libc.musl-*.so.1 and `ldd` output) and downloads the
-# kirocli-<arch>-linux-musl.zip release automatically — no glibc shim
-# (gcompat) is required on this base image. It installs to
-# $HOME/.local/bin, which is not on PATH by default, so PATH is extended
-# below. Must run as the non-root user: the installer writes under $HOME.
+# The Kiro v3 engine needs glibc (it downloads a glibc-linked Node binary),
+# which is why the base is Debian. The installer puts the binary in
+# $HOME/.local/bin, which is not on PATH by default, so PATH is extended below.
+# Must run as the non-root user: the installer writes under $HOME.
 USER agent
 WORKDIR /home/agent
 ENV PATH="/home/agent/.local/bin:${PATH}"
-# Pinned: the installer's default (latest) became 3.0.0, whose Alpine/musl
-# archive fails its own glibc check during install ("Could not determine glibc
-# version"). 2.37.1 is the release this integration was built and tested on.
+# Pinned to the release this integration was built and tested on (the
+# installer's default moves to newer major versions).
 ARG KIRO_CLI_VERSION=2.37.1
 RUN curl -fsSL https://cli.kiro.dev/install | bash -s -- --version "${KIRO_CLI_VERSION}" && \
     kiro-cli --version && \
