@@ -233,18 +233,18 @@ The images install Kiro CLI 2.37.1 (`KIRO_CLI_VERSION` build argument). The inst
 
 ## Development image
 
-`docker/dev/Dockerfile` runs the **source tree** of this repository with hot reload, in the same Alpine toolchain as the standard image (Node 24, native build tools, Claude Code, Kiro CLI). It does not install the published package and copies no repository files: the repository is bind-mounted at `/app`.
+`docker/dev/Dockerfile` runs the **source tree** of this repository with hot reload, on a Debian (glibc) base with Node 24, native build tools, Claude Code and Kiro CLI. Unlike the standard image it is not Alpine: the Kiro CLI v3 engine downloads a glibc-linked Node binary that cannot run on musl. It does not install the published package and copies no repository files: the repository is bind-mounted at `/app`.
 
 ```bash
 cp .env.compose.example .env.compose      # once: ports, API keys, workspace path
 docker compose --env-file .env.compose -f docker-compose.dev.yml up --build
 ```
 
-Compose variables live in `.env.compose`, not `.env`: the app reads a `.env` at the repository root, and the dev container sees that file through its bind mount. `.env.compose` is git-ignored; export `COMPOSE_ENV_FILES=.env.compose` to skip the `--env-file` flag. The same file also works for the standard stack (`docker compose --env-file .env.compose up --build`).
+The container sets `WORKSPACES_ROOT=/workspace`, so workspaces added in the UI must be paths under `/workspace`. Compose variables live in `.env.compose`, not `.env`: the app reads a `.env` at the repository root, and the dev container sees that file through its bind mount. `.env.compose` is git-ignored; export `COMPOSE_ENV_FILES=.env.compose` to skip the `--env-file` flag. The same file also works for the standard stack (`docker compose --env-file .env.compose up --build`).
 
 - UI with HMR: **http://localhost:5173** (Vite). API and WebSocket server: http://localhost:3001.
 - `npm run server:dev-watch` (restarts the API on server changes) and `npm run client` (Vite) run under `concurrently`.
-- `node_modules` lives in the `dev-node-modules` volume, built inside the container for Linux/musl; the host's `node_modules` is shadowed and never used. `docker/dev/dev-entrypoint.mjs` runs `npm install` on the first start and whenever `package.json` or `package-lock.json` change, and restores `package-lock.json` if npm rewrote it.
+- `node_modules` lives in the `dev-node-modules` volume, built inside the container for Linux/glibc; the host's `node_modules` is shadowed and never used. `docker/dev/dev-entrypoint.mjs` runs `npm install` on the first start and whenever `package.json` or `package-lock.json` change, and restores `package-lock.json` if npm rewrote it.
 - npm's download cache is the `dev-npm-cache` volume, so recreating the container (`down` then `up`) does not download packages again. A new or changed dependency is installed on top of the existing `node_modules`; only deleting the volumes (`down -v`) causes a full install.
 - `HUSKY=0` is set so the `prepare` script does not change the host repository's git hooks path.
 - The dev stack has its own `dev-*` volumes, so it never shares the auth DB or CLI credentials with the standard stack. Both stacks use ports 3001/5173 by default; override with `DEV_UI_PORT` / `DEV_SERVER_PORT`.
@@ -256,6 +256,8 @@ Variables for `docker-compose.dev.yml` (see `.env.compose.example`):
 | `WORKSPACE_PATH` | `./` | Host folder mounted at `/workspace` for the projects you open in the UI |
 | `VITE_USE_POLLING` | `false` | Set `true` if host edits do not reload the page (bind mounts from Windows/macOS may not deliver file-change events) |
 | `DEV_UI_PORT` / `DEV_SERVER_PORT` | `5173` / `3001` | Host ports |
+| `AGENT_UID` / `AGENT_GID` | `1000` / `1000` | uid/gid of the container user. Set to your host user's (`id -u`, `id -g`) so the container can write to the bind-mounted repository. A change needs a rebuild and fresh `dev-*` volumes |
+| `CLOUDCLI_KIRO_ENGINE` | `v3` | Kiro CLI engine used by CloudCLI (`v3` or `v2`) |
 | `KIRO_API_KEY`, `ANTHROPIC_API_KEY` | empty | Passed through as in the standard stack |
 
 `tsx watch` has no polling mode, so on a bind mount that does not deliver events, restart the container to pick up server-side changes.

@@ -9,7 +9,6 @@ services:
       context: ./docker
       dockerfile: dev/Dockerfile
       args:
-        ALPINE_VERSION: ${ALPINE_VERSION:-3.24}
         AGENT_UID: ${AGENT_UID:-1000}
         AGENT_GID: ${AGENT_GID:-1000}
     image: cloudcli:dev
@@ -29,8 +28,7 @@ services:
       VITE_USE_POLLING: ${VITE_USE_POLLING:-false}
       KIRO_API_KEY: ${KIRO_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      # Kiro CLI engine: v3 (default) or v2. The v3 engine downloads a glibc-linked
-      # Node that cannot run on this Alpine/musl image; set v2 to work around it.
+      # Kiro CLI engine: v3 (default) or v2.
       CLOUDCLI_KIRO_ENGINE: ${CLOUDCLI_KIRO_ENGINE:-v3}
     volumes:
       # The source tree being developed.

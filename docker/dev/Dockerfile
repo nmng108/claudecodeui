@@ -10,13 +10,11 @@
 #   docker build -f docker/dev/Dockerfile -t cloudcli:dev docker/
 # Normally started through docker-compose.dev.yml at the repository root.
 ARG MISE_VERSION=2026.11.0
-# Alpine release of the Node base image. Hosts whose libseccomp is too old to know
-# the `pwritev2` syscall (e.g. CentOS 7, libseccomp 2.3.x) fail every SQLite write
-# with "disk I/O error" on Alpine 3.24 (musl uses pwritev2); use 3.23 there.
-ARG ALPINE_VERSION=3.24
-# Static musl binary; mise picks musl or glibc builds of each tool at run time.
+# Static binary; works on any libc.
 FROM ghcr.io/jdx/mise:${MISE_VERSION} AS mise
-FROM node:24-alpine${ALPINE_VERSION}
+# Debian (glibc), not Alpine (musl): the Kiro CLI v3 engine downloads a
+# glibc-linked Node binary that cannot run on musl, even with gcompat.
+FROM node:24-bookworm-slim
 
 # uid/gid of the `agent` user. The bind-mounted repository and workspace keep
 # the host's ownership, so these must match the host user (`id -u`, `id -g`)
@@ -24,32 +22,34 @@ FROM node:24-alpine${ALPINE_VERSION}
 ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
-# Same toolchain as docker/standard/Dockerfile, so a bug seen here is a bug in
-# the shipped image too (see that file for why each package is needed).
-RUN apk add --no-cache \
+# - build-essential, python3: node-gyp, for native npm modules (node-pty,
+#   better-sqlite3, bcrypt).
+# - ripgrep: used by Claude Code and agents for search.
+# - jq, unzip: used by the Kiro CLI installer.
+# - sqlite3: for inspecting the app database.
+# - tini: PID 1 that forwards signals and reaps zombies.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
       bash \
+      build-essential \
+      ca-certificates \
       curl \
       git \
+      jq \
       openssh-client \
-      ca-certificates \
-      build-base \
       python3 \
       ripgrep \
-      libgcc \
-      libstdc++ \
-      jq \
-      sqlite \
-      unzip \
-      tini
+      sqlite3 \
+      tini \
+      unzip && \
+    rm -rf /var/lib/apt/lists/*
 
-# Claude Code's bundled ripgrep is glibc-linked; use the apk `rg` on musl.
-ENV USE_BUILTIN_RIPGREP=0
 RUN npm install -g @anthropic-ai/claude-code && \
     claude --version
 
-# node:24-alpine ships a `node` user at uid/gid 1000; rename it to `agent` like
-# the other images. /app/node_modules and ~/.npm are created here so the named
-# volumes mounted over them start out owned by `agent`.
+# node:24-bookworm-slim ships a `node` user at uid/gid 1000; replace it with
+# `agent` like the other images. /app/node_modules and ~/.npm are created here
+# so the named volumes mounted over them start out owned by `agent`.
 # mise: language version manager. The language list (docker/mise.toml) is part
 # of the image at /etc/mise/config.toml; the runtimes themselves are NOT baked
 # in. They are installed into /mise at container start by mise-sync.mjs, so
@@ -65,10 +65,10 @@ ENV MISE_DATA_DIR=/mise \
     MISE_CACHE_DIR=/mise/cache \
     MISE_YES=1 \
     PATH="/mise/shims:${PATH}"
-RUN deluser node 2>/dev/null || true; \
-    delgroup node 2>/dev/null || true; \
-    addgroup -g "${AGENT_GID}" agent && \
-    adduser -D -u "${AGENT_UID}" -G agent -h /home/agent -s /bin/bash agent && \
+RUN userdel -r node 2>/dev/null || true; \
+    groupdel node 2>/dev/null || true; \
+    groupadd -g "${AGENT_GID}" agent && \
+    useradd -m -u "${AGENT_UID}" -g agent -d /home/agent -s /bin/bash agent && \
     mkdir -p /workspace /mise /app/node_modules /home/agent/.npm \
         /home/agent/.claude /home/agent/.kiro /home/agent/.cloudcli && \
     chown -R agent:agent /workspace /mise /app /home/agent
@@ -76,9 +76,8 @@ RUN deluser node 2>/dev/null || true; \
 USER agent
 WORKDIR /home/agent
 ENV PATH="/home/agent/.local/bin:${PATH}"
-# Pinned: the installer's default (latest) became 3.0.0, whose Alpine/musl
-# archive fails its own glibc check during install ("Could not determine glibc
-# version"). 2.37.1 is the release this integration was built and tested on.
+# Pinned to the release this integration was built and tested on (the
+# installer's default moves to newer major versions).
 ARG KIRO_CLI_VERSION=2.37.1
 RUN curl -fsSL https://cli.kiro.dev/install | bash -s -- --version "${KIRO_CLI_VERSION}" && \
     kiro-cli --version
