@@ -1,0 +1,7 @@
+# Only what the image copies; the repository root is the build context.
+*
+!docker/ssh-agent/service.mjs
+!docker/ssh-agent/entrypoint.sh
+!docker/ssh-agent/rotate-key
+!server/modules/ssh-keys/ssh-key-core.ts
+!server/modules/ssh-keys/ssh-agent-proxy.ts

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Replaces the SSH key this container generated.
+#   docker compose exec ssh-agent rotate-key
+exec /opt/ssh-agent/entrypoint.sh rotate

@@ -336,7 +336,9 @@
       "replaceWarning": "A new key replaces this one. Remove the old key from your git servers and add the new one, or SSH access stops working.",
       "replaceConfirm": "Replace key",
       "cancel": "Cancel",
-      "warning": "Every process in this environment, including AI agents, can use this key. Prefer a dedicated key with limited access, such as a deploy key, over a personal one."
+      "warning": "Every process in this environment, including AI agents, can use this key. Prefer a dedicated key with limited access, such as a deploy key, over a personal one.",
+      "warningAgent": "The private key is held by a separate container. Processes here, including AI agents, can use it to sign in to git servers but cannot read it. Prefer a dedicated key with limited access, such as a deploy key, over a personal one.",
+      "rotateHint": "To replace this key, run the following on the host, then add the new public key to your git servers (the old one stops working):"
     }
   },
   "apiKeys": {

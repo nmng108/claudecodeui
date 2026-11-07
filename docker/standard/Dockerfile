@@ -93,10 +93,13 @@ ENV MISE_DATA_DIR=/mise \
     MISE_CACHE_DIR=/mise/cache \
     MISE_YES=1 \
     PATH="/mise/shims:${PATH}"
-# git over SSH: trust a git server's host key the first time it is seen and
-# remember it (in the ssh volume), so the first clone does not stop at a prompt
-# nobody can answer. A key that later changes is still refused.
-RUN printf 'Host *\n    StrictHostKeyChecking accept-new\n' > /etc/ssh/ssh_config.d/50-cloudcli.conf
+# git over SSH:
+# - trust a git server's host key the first time it is seen and remember it (in
+#   the cloudcli-home volume), so the first clone does not stop at a prompt nobody
+#   can answer. A key that later changes is still refused.
+# - authenticate through the ssh-agent sidecar's socket (docker-compose*.yml), which
+#   holds the private key; the key is never in this container.
+RUN printf 'Host *\n    StrictHostKeyChecking accept-new\n    UserKnownHostsFile /home/agent/.cloudcli/known_hosts\n    IdentityAgent /run/ssh/agent.sock\n' > /etc/ssh/ssh_config.d/50-cloudcli.conf
 RUN userdel -r node 2>/dev/null || true; \
     groupdel node 2>/dev/null || true; \
     groupadd -g "${AGENT_GID}" agent && \

@@ -1066,7 +1066,9 @@ export type SshKeyInfo = {
   canGenerate: boolean;
   canReplace: boolean;
   reason: 'passphrase-or-unreadable' | 'read-only' | 'ssh-keygen-missing' | null;
-  provider: 'native';
+  /** 
+ative: the key files of this user; gent: held by the ssh-agent container, which the app cannot read. */
+  provider: 'native' | 'agent';
 };
 
 /** One repository found inside a project folder; `path` is relative to the project and empty for the project itself. */

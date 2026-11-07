@@ -126,6 +126,13 @@ export default function SshKeySection() {
                 </div>
               </div>
 
+              {key.provider === 'agent' && key.origin === 'generated' && (
+                <p className="border-t border-border pt-3 text-sm text-muted-foreground">
+                  {t('git.sshKey.rotateHint')}{' '}
+                  <code className="rounded bg-muted px-1 py-0.5 text-xs">docker compose exec ssh-agent rotate-key</code>
+                </p>
+              )}
+
               {key.canReplace && (
                 <div className="border-t border-border pt-3">
                   {confirmingReplace ? (
@@ -150,7 +157,9 @@ export default function SshKeySection() {
             </div>
           )}
 
-          <p className="border-t border-border pt-3 text-xs text-muted-foreground">{t('git.sshKey.warning')}</p>
+          <p className="border-t border-border pt-3 text-xs text-muted-foreground">
+            {key?.provider === 'agent' ? t('git.sshKey.warningAgent') : t('git.sshKey.warning')}
+          </p>
         </div>
       </SettingsCard>
     </SettingsSection>

@@ -130,6 +130,16 @@ describe('SshKeySection', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('ssh-keygen is not installed');
   });
 
+  it('tells the user how to rotate a key held by the ssh-agent container', async () => {
+    current = { ...generated, provider: 'agent', canReplace: false };
+    render(<SshKeySection />);
+
+    await screen.findByDisplayValue('ssh-ed25519 AAAAC3Nza cloudcli@host');
+    expect(screen.getByText('docker compose exec ssh-agent rotate-key')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Replace key' })).toBeNull();
+    expect(screen.getByText(/held by a separate container/)).toBeTruthy();
+  });
+
   it('warns that every process in the environment can use the key', async () => {
     current = missing;
     render(<SshKeySection />);

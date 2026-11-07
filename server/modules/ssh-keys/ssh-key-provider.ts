@@ -29,8 +29,9 @@ export type SshKeyInfo = {
   canReplace: boolean;
   /** Why the key is unreadable, or why one cannot be generated. */
   reason: 'passphrase-or-unreadable' | 'read-only' | 'ssh-keygen-missing' | null;
-  /** Which implementation answered. */
-  provider: 'native';
+  /** Which implementation answered: the user's own key files (
+ative) or the ssh-agent sidecar (gent). */
+  provider: 'native' | 'agent';
 };
 
 export type GenerateSshKeyOptions = {

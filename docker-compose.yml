@@ -17,6 +17,9 @@ services:
       # keys). Left unset here on purpose — see docker/README.md.
       KIRO_API_KEY: ${KIRO_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # git over SSH uses the key held by the ssh-agent service.
+      SSH_AUTH_SOCK: /run/ssh/agent.sock
+      CLOUDCLI_SSH_CONTROL_SOCKET: /run/ssh/control.sock
     volumes:
       # Project files the agent reads/writes.
       - ${WORKSPACE_PATH:-./}:/workspace
@@ -26,16 +29,64 @@ services:
       # Kiro CLI's sign-in (browser login) and the engine it downloads on first use.
       - kiro-data:/home/agent/.local/share/kiro-cli
       - cloudcli-home:/home/agent/.cloudcli
-      # The SSH key git uses (generated from Settings > Git) and known_hosts.
-      - ssh-data:/home/agent/.ssh
+      # Sockets of the ssh-agent service: git over SSH authenticates through them.
+      - ssh-run:/run/ssh
       # Language runtimes (docker/mise.toml) plus any added with `mise use -g`
       - mise-data:/mise
     restart: unless-stopped
+    depends_on:
+      ssh-agent:
+        condition: service_healthy
 
+  # Holds the SSH private key, away from the app and the agents running in it. The
+  # app reaches it only through two sockets in the ssh-run volume (the ssh-agent
+  # socket, and a small API that shows the public key and can create a key).
+  # See docs/ssh-keys.md. Replace a generated key with:
+  #   docker compose exec ssh-agent rotate-key
+  ssh-agent:
+    build:
+      context: .
+      dockerfile: docker/ssh-agent/Dockerfile
+      args:
+        # Must equal the app's AGENT_GID: the sockets are group-accessible.
+        AGENT_GID: ${AGENT_GID:-1000}
+    image: cloudcli-ssh-agent:standard
+    container_name: cloudcli-ssh-agent
+    init: true
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      # Root only prepares the volumes, then drops to an unprivileged user (KILL lets
+      # the init process stop it).
+      - CHOWN
+      - FOWNER
+      - KILL
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ssh-keys:/keys
+      - ssh-run:/run/ssh
+      # To use a key of your own instead of a generated one, mount it (read-only):
+      #   - ~/.ssh/deploy_key:/keys/id_ed25519:ro
+      #   - ~/.ssh/deploy_key.pub:/keys/id_ed25519.pub:ro
+    healthcheck:
+      test: ['CMD', '/opt/ssh-agent/entrypoint.sh', 'health']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
 volumes:
   claude-home:
   kiro-home:
   kiro-data:
   cloudcli-home:
-  ssh-data:
+  ssh-keys:
+  ssh-run:
   mise-data:
