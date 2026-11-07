@@ -3,6 +3,7 @@
 #   docker compose --env-file .env.compose -f docker-compose.dev.yml up --build
 # UI (Vite, HMR): http://localhost:5173   API/WebSocket server: http://localhost:3001
 # For the published-package image use docker-compose.yml instead.
+# To give the agents Docker, add: -f docker-compose.dev.docker.yml (docs/docker-in-docker.md).
 services:
   cloudcli-dev:
     build:

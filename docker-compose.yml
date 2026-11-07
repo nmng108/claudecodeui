@@ -1,3 +1,4 @@
+# To give the agents Docker, add: -f docker-compose.docker.yml (docs/docker-in-docker.md).
 services:
   cloudcli:
     build:

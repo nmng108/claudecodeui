@@ -202,6 +202,7 @@ No keys are baked into the image. Pass them at `docker run`/`compose up` time as
 | `cloudcli-home` | `/home/agent/.cloudcli` | CloudCLI auth DB and stored API keys |
 | `ssh-keys` | `/keys` in the `ssh-agent` container | The SSH private key. Not mounted in the app container (see *Git over SSH*) |
 | `ssh-run` | `/run/ssh` | The ssh-agent and control sockets shared by the app and `ssh-agent` |
+| `dind-data` | `/var/lib/docker` in `dind` | Images, containers and build cache of the optional private Docker daemon (see *Docker for the agents*) |
 | `mise-data` | `/mise` | Language runtimes installed by mise (see below) |
 
 ### Base image: Debian (glibc), not Alpine
@@ -245,6 +246,18 @@ The private key is held by a separate container, `ssh-agent` (`dev-ssh-agent` in
 - **They can still use it.** An agent told to `git push` pushes as the key's owner. Use a dedicated key with limited access (a deploy key per repository), not your personal key.
 - **Group id.** The sockets are group-accessible. Build the app and the `ssh-agent` image with the same `AGENT_GID` (default 1000).
 - **No Docker?** Without `CLOUDCLI_SSH_CONTROL_SOCKET` the page manages `~/.ssh` (or `CLOUDCLI_SSH_DIR`) directly; there everything running as that user can read the private key.
+
+### Docker for the agents (optional)
+
+The images include the Docker CLI, `docker compose` and `docker buildx`, but no daemon. To let the agents build images and run containers, start the stack with the Docker-in-Docker overlay:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.docker.yml up -d --build
+# development stack:
+docker compose --env-file .env.compose -f docker-compose.dev.yml -f docker-compose.dev.docker.yml up -d --build
+```
+
+This adds a `dind` (`dev-dind`) service with a **private** Docker daemon (not your host's), reached over TLS. It runs **privileged**, so anything that can run Docker commands has host-level reach through it: read [docs/docker-in-docker.md](../docs/docker-in-docker.md) first. The workspace is mounted at `/workspace` in both containers, so bind mounts work. Containers the agents publish on `8080-8089` (`DIND_PORTS`) are reachable at `http://localhost:8080`, and from the app container at `http://dind:8080`.
 
 ### Kiro CLI version
 The images install Kiro CLI 2.37.1 (`KIRO_CLI_VERSION` build argument). The installer's default moves to newer major versions (it is now 3.0.0), so the version is pinned to the release this integration was tested on.

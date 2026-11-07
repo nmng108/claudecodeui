@@ -1,0 +1,59 @@
+# Optional: lets the agents in the app container run Docker (build images, run
+# containers, docker compose) against a private Docker daemon.
+#
+#   docker compose --env-file .env.compose -f docker-compose.dev.yml -f docker-compose.dev.docker.yml up -d --build
+#
+# The daemon runs in the `dev-dind` service (Docker-in-Docker). It is separate from
+# your host's Docker: its images and containers live in the dev-dind-data volume,
+# and it never sees your host's containers. The app container only gets the Docker
+# CLI and DOCKER_HOST; it has no access to /var/run/docker.sock of the host.
+#
+# Read docs/docker-in-docker.md first: the `dev-dind` service must run privileged, so
+# anything that can run Docker commands can act with the privileges of that container.
+services:
+  cloudcli-dev:
+    environment:
+      DOCKER_HOST: tcp://dev-dind:2376
+      DOCKER_TLS_VERIFY: '1'
+      DOCKER_CERT_PATH: /certs/client
+    volumes:
+      # Client certificate for the TLS connection to the daemon.
+      - dev-dind-certs-client:/certs/client:ro
+    depends_on:
+      dev-dind:
+        condition: service_healthy
+
+  dev-dind:
+    # Keep the major version equal to the Docker CLI in the app image (DOCKER_VERSION).
+    image: ${DIND_IMAGE:-docker:29-dind}
+    container_name: cloudcli-dev-dind
+    privileged: true
+    environment:
+      # The daemon listens on TCP with mutual TLS; certificates are generated here.
+      DOCKER_TLS_CERTDIR: /certs
+      DOCKER_TLS_SAN: DNS:dev-dind
+    volumes:
+      # Images, containers and build cache survive restarts.
+      - dev-dind-data:/var/lib/docker
+      - dev-dind-certs-ca:/certs/ca
+      - dev-dind-certs-client:/certs/client
+      # The same path as in the app container, so `docker run -v /workspace/app:/app ...`
+      # run by an agent finds its files.
+      - ${WORKSPACE_PATH:-./}:/workspace
+    ports:
+      # Containers the agents start with `-p 8080:80` are published by the daemon, which
+      # lives here: this range makes them reachable from your machine (localhost:8080).
+      # From the app container use dev-dind:8080. Override with DIND_PORTS.
+      - '${DIND_PORTS:-8080-8089}:${DIND_PORTS:-8080-8089}'
+    healthcheck:
+      test: ['CMD', 'docker', 'info']
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
+    restart: unless-stopped
+
+volumes:
+  dev-dind-data:
+  dev-dind-certs-ca:
+  dev-dind-certs-client:
