@@ -3,6 +3,7 @@
 #   docker compose --env-file .env.compose -f docker-compose.dev.yml up --build
 # UI (Vite, HMR): http://localhost:5173   API/WebSocket server: http://localhost:3001
 # For the published-package image use docker-compose.yml instead.
+# To give the agents Docker, enable a docker profile: --profile docker (docs/docker-in-docker.md).
 services:
   cloudcli-dev:
     build:
@@ -31,6 +32,10 @@ services:
       # git over SSH uses the key held by the dev-ssh-agent service.
       SSH_AUTH_SOCK: /run/ssh/agent.sock
       CLOUDCLI_SSH_CONTROL_SOCKET: /run/ssh/control.sock
+      # Docker for the agents: used when a docker profile is enabled, ignored otherwise.
+      DOCKER_HOST: tcp://dind:2376
+      DOCKER_TLS_VERIFY: '1'
+      DOCKER_CERT_PATH: /certs/client
       # Kiro CLI engine: v3 (default) or v2.
       CLOUDCLI_KIRO_ENGINE: ${CLOUDCLI_KIRO_ENGINE:-v3}
     volumes:
@@ -50,12 +55,23 @@ services:
       - dev-cloudcli-home:/home/agent/.cloudcli
       # Sockets of the dev-ssh-agent service: git over SSH authenticates through them.
       - dev-ssh-run:/run/ssh
+      # Client certificate for the optional Docker daemon (empty unless a docker profile is on).
+      - dev-dind-certs-client:/certs/client:ro
       # Language runtimes (docker/mise.toml) plus any added with `mise use -g`
       - dev-mise-data:/mise
     restart: unless-stopped
     depends_on:
       dev-ssh-agent:
         condition: service_healthy
+      dev-dind:
+        condition: service_healthy
+        required: false
+      dev-dind-privileged:
+        condition: service_healthy
+        required: false
+    networks:
+      - default
+      - dev-dockernet
 
   # Holds the SSH private key, away from the app and the agents running in it. The
   # app reaches it only through two sockets in the ssh-run volume (the ssh-agent
@@ -101,6 +117,83 @@ services:
       retries: 12
       start_period: 5s
     restart: unless-stopped
+  # --- Docker for the agents (optional, off by default) --------------------------
+  # A private Docker daemon the agents reach with the Docker CLI in the app image.
+  #   docker compose --profile docker up -d              rootless daemon (recommended)
+  #   docker compose --profile docker-privileged up -d   privileged daemon (fallback)
+  # Not your host's Docker: its images and containers live in the dev-dind-rootless-data volume
+  # (dev-dind-data for the privileged one).
+  # Read docs/docker-in-docker.md before enabling it. Use one profile at a time.
+  dev-dind:
+    profiles: ['docker']
+    # Rootless: dockerd runs as an unprivileged user in a user namespace, so a
+    # container that escapes lands without capabilities. It needs no `privileged`,
+    # but it does need the three unconfined options and the tun device.
+    image: ${DIND_IMAGE:-docker:29-dind-rootless}
+    container_name: cloudcli-dev-dind
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+      - systempaths=unconfined
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      DOCKER_TLS_CERTDIR: /certs
+      DOCKER_TLS_SAN: DNS:dind
+    volumes:
+      - dev-dind-rootless-data:/home/rootless/.local/share/docker
+      - dev-dind-certs-client:/certs/client
+      # Same path as in the app container, so `docker run -v /workspace/app:/app` works.
+      - ${WORKSPACE_PATH:-./}:/workspace
+    ports:
+      # Published to this machine only (localhost), not to the network.
+      - '127.0.0.1:${DIND_PORTS:-8080-8089}:${DIND_PORTS:-8080-8089}'
+    networks:
+      dev-dockernet:
+        aliases: [dind]
+    mem_limit: ${DIND_MEMORY:-6g}
+    pids_limit: ${DIND_PIDS:-4096}
+    healthcheck:
+      test: ['CMD-SHELL', 'DOCKER_HOST=unix:///run/user/1000/docker.sock docker info']
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
+    restart: unless-stopped
+
+  dev-dind-privileged:
+    profiles: ['docker-privileged']
+    # Privileged: for hosts where the rootless daemon does not start. Anything that
+    # can run Docker commands then has root-equivalent reach on the Docker host.
+    image: ${DIND_PRIVILEGED_IMAGE:-docker:29-dind}
+    container_name: cloudcli-dev-dind-privileged
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: /certs
+      DOCKER_TLS_SAN: DNS:dind
+    volumes:
+      - dev-dind-data:/var/lib/docker
+      - dev-dind-certs-client:/certs/client
+      - ${WORKSPACE_PATH:-./}:/workspace
+    ports:
+      - '127.0.0.1:${DIND_PORTS:-8080-8089}:${DIND_PORTS:-8080-8089}'
+    networks:
+      dev-dockernet:
+        aliases: [dind]
+    mem_limit: ${DIND_MEMORY:-6g}
+    pids_limit: ${DIND_PIDS:-4096}
+    healthcheck:
+      test: ['CMD', 'docker', 'info']
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 15s
+    restart: unless-stopped
+networks:
+  # Shared by the app and the Docker daemon only, so containers the agents start do not
+  # reach the other containers of this compose project.
+  dev-dockernet:
+
 volumes:
   dev-node-modules:
   dev-npm-cache:
@@ -111,3 +204,6 @@ volumes:
   dev-ssh-keys:
   dev-ssh-run:
   dev-mise-data:
+  dev-dind-data:
+  dev-dind-rootless-data:
+  dev-dind-certs-client:

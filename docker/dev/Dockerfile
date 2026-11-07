@@ -10,8 +10,12 @@
 #   docker build -f docker/dev/Dockerfile -t cloudcli:dev docker/
 # Normally started through docker-compose.dev.yml at the repository root.
 ARG MISE_VERSION=2026.11.0
+# Docker major version of the CLI; keep it equal to the dind service's (docker-compose.docker.yml).
+ARG DOCKER_VERSION=29
 # Static binary; works on any libc.
 FROM ghcr.io/jdx/mise:${MISE_VERSION} AS mise
+# The Docker CLI is a static Go binary, so the Alpine-based CLI image is only a download source.
+FROM docker:${DOCKER_VERSION}-cli AS docker-cli
 # Debian (glibc), not Alpine (musl): the Kiro CLI v3 engine downloads a
 # glibc-linked Node binary that cannot run on musl, even with gcompat.
 FROM node:24-bookworm-slim
@@ -58,6 +62,13 @@ RUN npm install -g @anthropic-ai/claude-code && \
 # Shims on PATH make `java`, `python`, ... work in non-interactive shells
 # without `mise activate`.
 COPY --from=mise /usr/local/bin/mise /usr/local/bin/mise
+
+# Docker CLI with the compose and buildx plugins. There is no daemon in this image:
+# commands reach the dind service when docker-compose.docker.yml is added (DOCKER_HOST),
+# and fail with "cannot connect" otherwise.
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr/local/libexec/docker/cli-plugins/docker-compose
+COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
 COPY mise.toml /etc/mise/config.toml
 COPY shared/mise-sync.mjs /usr/local/lib/cloudcli/mise-sync.mjs
 ENV MISE_DATA_DIR=/mise \
