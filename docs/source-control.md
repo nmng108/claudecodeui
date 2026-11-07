@@ -114,7 +114,7 @@ hooks are only evaluated by a real push.
 
 The ones git would use for a push from that repository: the user's credential helpers or
 URL for https, and the default SSH identity (or the agent) for ssh. The check does not
-configure anything. Managing credentials is not part of this change.
+configure anything. The SSH key itself is managed in Settings > Git; see [ssh-keys.md](ssh-keys.md).
 
 ## Not covered
 

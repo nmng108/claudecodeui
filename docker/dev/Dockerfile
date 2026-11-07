@@ -65,13 +65,18 @@ ENV MISE_DATA_DIR=/mise \
     MISE_CACHE_DIR=/mise/cache \
     MISE_YES=1 \
     PATH="/mise/shims:${PATH}"
+# git over SSH: trust a git server's host key the first time it is seen and
+# remember it (in the ssh volume), so the first clone does not stop at a prompt
+# nobody can answer. A key that later changes is still refused.
+RUN printf 'Host *\n    StrictHostKeyChecking accept-new\n' > /etc/ssh/ssh_config.d/50-cloudcli.conf
 RUN userdel -r node 2>/dev/null || true; \
     groupdel node 2>/dev/null || true; \
     groupadd -g "${AGENT_GID}" agent && \
     useradd -m -u "${AGENT_UID}" -g agent -d /home/agent -s /bin/bash agent && \
     mkdir -p /workspace /mise /app/node_modules /home/agent/.npm \
         /home/agent/.claude /home/agent/.kiro /home/agent/.cloudcli \
-        /home/agent/.local/share/kiro-cli && \
+        /home/agent/.local/share/kiro-cli /home/agent/.ssh && \
+    chmod 700 /home/agent/.ssh && \
     chown -R agent:agent /workspace /mise /app /home/agent
 
 USER agent

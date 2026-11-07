@@ -50,6 +50,7 @@ import {
 import browserUseRoutes from './modules/browser-use/browser-use.routes.js';
 import { assetsRoutes } from './modules/assets/index.js';
 import { fileTreeRoutes } from './modules/file-tree/index.js';
+import { sshKeysRoutes } from './modules/ssh-keys/index.js';
 import { worktreesRoutes } from './modules/worktrees/index.js';
 import browserUseMcpRoutes from './modules/browser-use/browser-use-mcp.routes.js';
 import { browserUseService } from './modules/browser-use/browser-use.service.js';
@@ -170,6 +171,7 @@ app.use('/api/git', authenticateToken, gitRoutes);
 
 // Git worktree management (protected)
 app.use('/api/worktrees', authenticateToken, worktreesRoutes);
+app.use('/api/ssh-keys', authenticateToken, sshKeysRoutes);
 
 // TaskMaster API Routes (protected)
 app.use('/api/taskmaster', authenticateToken, taskmasterRoutes);

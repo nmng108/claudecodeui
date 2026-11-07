@@ -26,6 +26,8 @@ services:
       # Kiro CLI's sign-in (browser login) and the engine it downloads on first use.
       - kiro-data:/home/agent/.local/share/kiro-cli
       - cloudcli-home:/home/agent/.cloudcli
+      # The SSH key git uses (generated from Settings > Git) and known_hosts.
+      - ssh-data:/home/agent/.ssh
       # Language runtimes (docker/mise.toml) plus any added with `mise use -g`
       - mise-data:/mise
     restart: unless-stopped
@@ -35,4 +37,5 @@ volumes:
   kiro-home:
   kiro-data:
   cloudcli-home:
+  ssh-data:
   mise-data:

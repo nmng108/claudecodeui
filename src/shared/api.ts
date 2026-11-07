@@ -433,6 +433,14 @@ export const api = {
       post('/api/git/generate-commit-message', { project: projectId, repo: repoOf(projectId), files, provider }),
   },
 
+  // The SSH key git uses over SSH. Responses carry the public key only.
+  sshKeys: {
+    get: () => get('/api/ssh-keys'),
+    // `replace` swaps a key the app generated earlier; any other key is refused by the server.
+    generate: ({ replace = false }: { replace?: boolean } = {}) =>
+      post('/api/ssh-keys/generate', { replace }),
+  },
+
   worktrees: {
     list: (projectId: string) => get(`/api/worktrees${query({ project: projectId, repo: repoOf(projectId) })}`),
     create: (

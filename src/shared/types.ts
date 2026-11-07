@@ -1051,6 +1051,24 @@ export type GitRemoteStatus = {
   error?: string;
 };
 
+/** State of the SSH key git uses over SSH; carries only the public half. */
+export type SshKeyInfo = {
+  /** `unreadable`: a private key exists but its public half cannot be read (for example it needs a passphrase). */
+  status: 'present' | 'missing' | 'unreadable';
+  /** `generated` keys were created by the app and can be replaced from the UI; `existing` ones never are. */
+  origin: 'generated' | 'existing' | null;
+  type: string | null;
+  /** One-line OpenSSH public key to add to a git server. */
+  publicKey: string | null;
+  fingerprint: string | null;
+  comment: string | null;
+  location: string | null;
+  canGenerate: boolean;
+  canReplace: boolean;
+  reason: 'passphrase-or-unreadable' | 'read-only' | 'ssh-keygen-missing' | null;
+  provider: 'native';
+};
+
 /** One repository found inside a project folder; `path` is relative to the project and empty for the project itself. */
 export type GitRepositoryEntry = {
   path: string;

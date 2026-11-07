@@ -5,6 +5,7 @@ import { useGitSettings } from '@/modules/settings/hooks/useGitSettings';
 import { Button, Input } from '@/shared/ui';
 import SettingsCard from '@/modules/settings/SettingsCard';
 import SettingsSection from '@/modules/settings/SettingsSection';
+import SshKeySection from '@/modules/settings/tabs/git-settings/SshKeySection';
 
 /** Rendered by Settings for the "git" tab, configuring the commit identity and git preferences. */
 export default function GitSettingsTab() {
@@ -78,6 +79,8 @@ export default function GitSettingsTab() {
           </div>
         </SettingsCard>
       </SettingsSection>
+
+      <SshKeySection />
     </div>
   );
 }
