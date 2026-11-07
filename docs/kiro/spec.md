@@ -28,6 +28,9 @@
 - R2.4 The key is never logged or returned to the client. Only a masked form and the method are exposed.
 - R2.5 `POST` and `DELETE /api/providers/kiro/api-key` save and clear the stored key.
 
+- R2.6 Browser sign-in through the OAuth device flow: `POST /api/providers/kiro/login` runs `kiro-cli login --use-device-flow` for AWS Builder ID (`--license free`) or IAM Identity Center (`--license pro --identity-provider <https start URL> --region <region>`, both validated) and returns the verification URL and one-time code. `GET` returns the state (`starting`, `awaiting_confirmation`, `succeeded`, `failed`, `cancelled`), `DELETE` cancels, `POST /api/providers/kiro/logout` runs `kiro-cli logout`. One sign-in runs at a time and times out after 15 minutes. `KIRO_API_KEY` is removed from the login command's environment.
+- R2.7 Auth status: an API key (environment, then file) takes precedence; without one, `kiro-cli whoami --format json` reporting an account counts as authenticated with method `cli_login`.
+
 ### R3 Package
 - R3.1 `name` is `@namng108/cloudcli`, `version` is `1.38.0`, `publishConfig.access` is `public`.
 - R3.2 Every in-repo reference to `@cloudcli-ai/cloudcli` is updated, except upstream repository URLs and `redirect-package`.

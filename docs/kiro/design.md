@@ -27,6 +27,7 @@ Reference implementation for ACP behavior: the kiro-ui repo (`server.ts`, `src/s
 | --- | --- |
 | `kiro.provider.ts` | Wrapper extending `AbstractProvider`, `super('kiro')` |
 | `kiro-api-key.store.ts` | Read/write `~/.cloudcli/kiro-auth.json` (0600, atomic), mask, env precedence |
+| `kiro-login.service.ts` | Browser sign-in: runs `kiro-cli login --use-device-flow` (Builder ID, or IAM Identity Center with start URL and region), parses the verification URL and code, tracks one sign-in at a time; `whoami` for status, `logout` |
 | `kiro-auth.provider.ts` | `probeCliVersion('kiro-cli')` + key state -> `ProviderAuthStatus` |
 | `kiro-acp.client.ts` | Spawns `kiro-cli acp`, wraps `ClientSideConnection`, exposes prompt/cancel/list/load |
 | `kiro-runtime.provider.js` | Run/abort, permission bridge, normalized streaming |

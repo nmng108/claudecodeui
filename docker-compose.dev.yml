@@ -42,6 +42,8 @@ services:
       # Separate from the standard stack's volumes so the two never share an auth DB.
       - dev-claude-home:/home/agent/.claude
       - dev-kiro-home:/home/agent/.kiro
+      # Kiro CLI's sign-in (browser login) and the engine it downloads on first use.
+      - dev-kiro-data:/home/agent/.local/share/kiro-cli
       - dev-cloudcli-home:/home/agent/.cloudcli
       # Language runtimes (docker/mise.toml) plus any added with `mise use -g`
       - dev-mise-data:/mise
@@ -52,5 +54,6 @@ volumes:
   dev-npm-cache:
   dev-claude-home:
   dev-kiro-home:
+  dev-kiro-data:
   dev-cloudcli-home:
   dev-mise-data:

@@ -116,7 +116,7 @@ export default function KiroApiKeyPanel({ authStatus, onChanged }: KiroApiKeyPan
         <div className="mt-1 text-sm text-muted-foreground">
           {isEnvironmentManaged ? (
             t('agents.kiro.apiKey.managedByEnvironment')
-          ) : authStatus.authenticated && authStatus.email ? (
+          ) : authStatus.authenticated && authStatus.email && authStatus.method !== 'cli_login' ? (
             authStatus.email
           ) : (
             t('agents.kiro.apiKey.noKeyStored')

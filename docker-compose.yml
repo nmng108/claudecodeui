@@ -23,6 +23,8 @@ services:
       # Persisted CLI credentials/config across container restarts.
       - claude-home:/home/agent/.claude
       - kiro-home:/home/agent/.kiro
+      # Kiro CLI's sign-in (browser login) and the engine it downloads on first use.
+      - kiro-data:/home/agent/.local/share/kiro-cli
       - cloudcli-home:/home/agent/.cloudcli
       # Language runtimes (docker/mise.toml) plus any added with `mise use -g`
       - mise-data:/mise
@@ -31,5 +33,6 @@ services:
 volumes:
   claude-home:
   kiro-home:
+  kiro-data:
   cloudcli-home:
   mise-data:

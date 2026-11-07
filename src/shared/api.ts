@@ -458,6 +458,13 @@ export const api = {
     deleteApiKey: (provider: string) =>
       del(`/api/providers/${encodeURIComponent(provider)}/api-key`),
 
+    // Kiro-only: browser sign-in through the OAuth device flow (`kiro-cli login`).
+    kiroLoginState: () => get('/api/providers/kiro/login'),
+    startKiroLogin: (input: { method: 'builder-id' | 'identity-center'; startUrl?: string; region?: string }) =>
+      post('/api/providers/kiro/login', input),
+    cancelKiroLogin: () => del('/api/providers/kiro/login'),
+    kiroLogout: () => post('/api/providers/kiro/logout'),
+
     models: (provider: string) => get(`/api/providers/${provider}/models`),
     createModel: (provider: string, input: unknown) =>
       post(`/api/providers/${provider}/models`, input),

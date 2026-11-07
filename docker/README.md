@@ -198,6 +198,7 @@ No keys are baked into the image. Pass them at `docker run`/`compose up` time as
 | workspace | `/workspace` | Your project files |
 | `claude-home` | `/home/agent/.claude` | Claude Code sessions/config |
 | `kiro-home` | `/home/agent/.kiro` | Kiro CLI sessions/config |
+| `kiro-data` | `/home/agent/.local/share/kiro-cli` | Kiro CLI sign-in (browser login) and the engine it downloads on first use |
 | `cloudcli-home` | `/home/agent/.cloudcli` | CloudCLI auth DB and stored API keys |
 | `mise-data` | `/mise` | Language runtimes installed by mise (see below) |
 
@@ -222,8 +223,14 @@ Both images include [mise](https://mise.jdx.dev), so agents and you can run Java
 - Shims on `PATH` (`/mise/shims`) make `java`, `python`, ... work in non-interactive shells without `mise activate`. A project's own `mise.toml` or `.tool-versions` overrides the versions in its directory; pick another version for one command with `mise exec java@temurin-8 -- java -version`.
 - Start over with `docker compose down -v` (removes all volumes) or `docker volume rm <project>_mise-data`.
 
-### Kiro CLI version
+### Kiro sign-in
 
+Settings → Agents → Kiro → *Manage sign-in* offers two ways to authenticate:
+
+- **Browser sign-in (device flow).** The server runs `kiro-cli login --use-device-flow` and shows a link and a one-time code. Open the link in a browser on any machine (the container needs no browser), confirm the code, and the CLI finishes the sign-in by itself. *AWS Builder ID* is the personal/free route; *Organization* signs in through IAM Identity Center with the start URL and region from your administrator. Google and GitHub social login is not available in this flow. The token is stored by Kiro CLI in `~/.local/share/kiro-cli`, which is the `kiro-data` volume.
+- **API key.** Paste a key from app.kiro.dev, or set `KIRO_API_KEY`. A key takes precedence over a browser sign-in.
+
+### Kiro CLI version
 The images install Kiro CLI 2.37.1 (`KIRO_CLI_VERSION` build argument). The installer's default moves to newer major versions (it is now 3.0.0), so the version is pinned to the release this integration was tested on.
 ### Health & readiness
 

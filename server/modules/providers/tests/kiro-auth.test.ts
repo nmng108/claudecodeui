@@ -50,6 +50,7 @@ const withoutKiroEnvKey = async (run: () => Promise<void>) => {
 const authWithInstalled = (installed: boolean, version: string | null = null): KiroProviderAuth => {
   const auth = new KiroProviderAuth();
   auth.checkInstalled = () => ({ installed, exitCode: installed ? 0 : null, version });
+  auth.checkCliLogin = async () => null; // never shell out to a real `kiro-cli whoami`
   return auth;
 };
 

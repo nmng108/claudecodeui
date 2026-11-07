@@ -97,7 +97,8 @@ RUN userdel -r node 2>/dev/null || true; \
     groupdel node 2>/dev/null || true; \
     groupadd -g "${AGENT_GID}" agent && \
     useradd -m -u "${AGENT_UID}" -g agent -d /home/agent -s /bin/bash agent && \
-    mkdir -p /workspace /mise /home/agent/.claude /home/agent/.kiro /home/agent/.cloudcli && \
+    mkdir -p /workspace /mise /home/agent/.claude /home/agent/.kiro /home/agent/.cloudcli \
+        /home/agent/.local/share/kiro-cli && \
     chown -R agent:agent /workspace /mise /home/agent
 
 # ---------------------------------------------------------------------------

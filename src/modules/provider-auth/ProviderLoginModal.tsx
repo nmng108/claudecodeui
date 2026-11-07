@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
 
@@ -5,6 +6,7 @@ import { StandaloneShell } from '@/modules/standalone-shell';
 import { IS_PLATFORM } from '@/shared/utils';
 import type { LLMProvider, ProviderAuthStatus } from '@/shared/types';
 import KiroApiKeyPanel from '@/modules/provider-auth/KiroApiKeyPanel';
+import KiroLoginPanel from '@/modules/provider-auth/KiroLoginPanel';
 
 /**
  * For empty shell instances where no project is provided,
@@ -29,7 +31,7 @@ type ProviderLoginModalProps = {
   onComplete?: (exitCode: number) => void;
   customCommand?: string;
   isAuthenticated?: boolean;
-  /** Required for `kiro`, which renders an API-key form instead of a CLI login shell and needs the current masked state. */
+  /** Required for `kiro`, which renders a browser sign-in and an API-key form instead of a CLI login shell and needs the current state. */
   authStatus?: ProviderAuthStatus;
 };
 
@@ -70,7 +72,7 @@ const getProviderTitle = (provider: LLMProvider) => {
   if (provider === 'cursor') return 'Cursor CLI Login';
   if (provider === 'codex') return 'Codex CLI Login';
   if (provider === 'opencode') return 'OpenCode CLI Login';
-  if (provider === 'kiro') return 'Kiro API Key';
+  if (provider === 'kiro') return 'Kiro Sign-in';
   return 'Claude CLI Login';
 };
 
@@ -92,6 +94,7 @@ export default function ProviderLoginModal({
   isAuthenticated = false,
   authStatus,
 }: ProviderLoginModalProps) {
+  const [kiroTab, setKiroTab] = useState<'browser' | 'apiKey'>('browser');
   const { t } = useTranslation();
   if (!isOpen) {
     return null;
@@ -104,8 +107,9 @@ export default function ProviderLoginModal({
     // Keep the modal open so users can read terminal output before closing.
   };
 
-  // Kiro has no CLI login command to run in a shell: it authenticates with a
-  // pasted API key saved through POST/DELETE /api/providers/kiro/api-key.
+  // Kiro has no CLI login command to run in this shell. It offers a browser
+  // sign-in (device flow, POST /api/providers/kiro/login) and a pasted API key
+  // (POST/DELETE /api/providers/kiro/api-key).
   if (provider === 'kiro') {
     return (
       <div
@@ -124,11 +128,37 @@ export default function ProviderLoginModal({
             </button>
           </div>
 
+          <div role="tablist" className="flex gap-1 border-b border-gray-200 px-4 pt-2 dark:border-gray-700">
+            {(['browser', 'apiKey'] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                role="tab"
+                aria-selected={kiroTab === tab}
+                onClick={() => setKiroTab(tab)}
+                className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+                  kiroTab === tab
+                    ? 'border-primary text-foreground'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {t(`settings:agents.kiro.login.tabs.${tab}`)}
+              </button>
+            ))}
+          </div>
+
           <div className="flex-1 overflow-y-auto">
-            <KiroApiKeyPanel
-              authStatus={authStatus ?? EMPTY_KIRO_AUTH_STATUS}
-              onChanged={() => handleComplete(0)}
-            />
+            {kiroTab === 'browser' ? (
+              <KiroLoginPanel
+                authStatus={authStatus ?? EMPTY_KIRO_AUTH_STATUS}
+                onChanged={() => handleComplete(0)}
+              />
+            ) : (
+              <KiroApiKeyPanel
+                authStatus={authStatus ?? EMPTY_KIRO_AUTH_STATUS}
+                onChanged={() => handleComplete(0)}
+              />
+            )}
           </div>
         </div>
       </div>

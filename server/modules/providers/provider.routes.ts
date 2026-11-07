@@ -15,6 +15,13 @@ import {
   getKiroApiKeyState,
   saveKiroApiKey,
 } from '@/modules/providers/list/kiro/kiro-api-key.store.js';
+import {
+  cancelKiroLogin,
+  getKiroLoginState,
+  logoutKiroCli,
+  startKiroLogin,
+  type KiroLoginMethod,
+} from '@/modules/providers/list/kiro/kiro-login.service.js';
 import type {
   CustomProviderModelEffort,
   CustomProviderModelInput,
@@ -682,6 +689,47 @@ router.delete(
   }),
 );
 
+/** Current state of the browser sign-in, polled by the UI while the user confirms the code. */
+router.get(
+  '/kiro/login',
+  asyncHandler(async (_req: Request, res: Response) => {
+    res.json(createApiSuccessResponse(getKiroLoginState()));
+  }),
+);
+
+/**
+ * Starts `kiro-cli login --use-device-flow` (Builder ID, or IAM Identity Center
+ * with a start URL and region) and returns the verification URL and code to show.
+ */
+router.post(
+  '/kiro/login',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
+    const state = await startKiroLogin({
+      method: body.method as KiroLoginMethod,
+      startUrl: typeof body.startUrl === 'string' ? body.startUrl : undefined,
+      region: typeof body.region === 'string' ? body.region : undefined,
+    });
+    res.json(createApiSuccessResponse(state));
+  }),
+);
+
+/** Cancels a running browser sign-in. */
+router.delete(
+  '/kiro/login',
+  asyncHandler(async (_req: Request, res: Response) => {
+    res.json(createApiSuccessResponse(cancelKiroLogin()));
+  }),
+);
+
+/** Signs `kiro-cli` out (`kiro-cli logout`). An API key is unaffected. */
+router.post(
+  '/kiro/logout',
+  asyncHandler(async (_req: Request, res: Response) => {
+    await logoutKiroCli();
+    res.json(createApiSuccessResponse({ provider: 'kiro' }));
+  }),
+);
 /** The installed CLI version, the newest npm release, whether this server can update the CLI and whether it is doing so. */
 router.get(
   '/:provider/cli',

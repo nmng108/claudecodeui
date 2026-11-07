@@ -413,9 +413,49 @@
     },
     "connectionStatus": "Connection Status",
     "kiro": {
+      "login": {
+        "title": "Sign in with your browser",
+        "description": "The server starts the sign-in and shows a link and a code. Open the link in any browser, on any device, and confirm the code. The server needs no browser.",
+        "tabs": {
+          "browser": "Browser sign-in",
+          "apiKey": "API key"
+        },
+        "methodLabel": "Sign-in method",
+        "methods": {
+          "builderId": {
+            "title": "AWS Builder ID",
+            "description": "Personal account on the free tier."
+          },
+          "organization": {
+            "title": "Organization (IAM Identity Center)",
+            "description": "Use the start URL and region your administrator gave you."
+          }
+        },
+        "startUrlLabel": "Start URL",
+        "regionLabel": "Region",
+        "organizationHint": "The AWS region that hosts your Identity Center directory, for example us-east-1.",
+        "start": "Sign in",
+        "tryAgain": "Try again",
+        "starting": "Starting the sign-in.",
+        "openAndConfirm": "Open this page in a browser and confirm the code.",
+        "openPage": "Open the sign-in page",
+        "copyUrl": "Copy the sign-in link",
+        "codeLabel": "Code to confirm",
+        "copyCode": "Copy the code",
+        "waiting": "Waiting for you to confirm in the browser.",
+        "cancel": "Cancel",
+        "succeeded": "Signed in.",
+        "signedIn": "Signed in",
+        "signOut": "Sign out",
+        "apiKeyTakesPrecedence": "An API key is also configured and takes precedence over this sign-in.",
+        "errors": {
+          "startFailed": "Unable to start the Kiro sign-in.",
+          "signOutFailed": "Unable to sign out of Kiro."
+        }
+      },
       "apiKey": {
         "title": "Kiro API key",
-        "description": "Kiro CLI authenticates with an API key instead of a browser login.",
+        "description": "Authenticate Kiro CLI with an API key, for example in a container or a script.",
         "generateLink": "Generate a key at app.kiro.dev",
         "currentState": "Current state",
         "managedByEnvironment": "Managed by the KIRO_API_KEY environment variable",
@@ -425,9 +465,9 @@
         "inputPlaceholder": "Paste your Kiro API key",
         "saveButton": "Save",
         "clearButton": "Clear",
-        "manageTitle": "Kiro API key",
-        "manageDescription": "Save or clear the API key kiro-cli uses to authenticate",
-        "manageButton": "Manage API key",
+        "manageTitle": "Kiro sign-in",
+        "manageDescription": "Sign in with your browser, or save the API key kiro-cli uses to authenticate",
+        "manageButton": "Manage sign-in",
         "errors": {
           "saveFailed": "Unable to save the Kiro API key.",
           "clearFailed": "Unable to clear the Kiro API key."

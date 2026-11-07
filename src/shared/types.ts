@@ -1365,6 +1365,17 @@ export type ProviderAuthStatus = {
   installedVersion?: string | null;
 };
 
+export type KiroLoginMethod = 'builder-id' | 'identity-center';
+
+/** State of the Kiro browser sign-in (device flow) run by the server: `GET/POST/DELETE /api/providers/kiro/login`. */
+export type KiroLoginState = {
+  status: 'idle' | 'starting' | 'awaiting_confirmation' | 'succeeded' | 'failed' | 'cancelled';
+  method: KiroLoginMethod | null;
+  verificationUrl: string | null;
+  userCode: string | null;
+  error: string | null;
+};
+
 /** The authentication state of every CLI provider at once, keyed by LLMProvider, so onboarding and settings can render each provider's connected, loading and error state from one object returned by useProviderAuthStatus. */
 export type ProviderAuthStatusMap = Record<LLMProvider, ProviderAuthStatus>;
 
