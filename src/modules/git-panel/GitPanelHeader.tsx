@@ -1,5 +1,5 @@
 import { AlertCircle, Check, ChevronDown, Download, GitBranch, Plus, RefreshCw, RotateCcw, Search, Upload, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { ConfirmationRequest, GitRemoteStatus } from '@/shared/types';
@@ -18,6 +18,8 @@ type GitPanelHeaderProps = {
   isPublishing: boolean;
   isRevertingLocalCommit: boolean;
   operationError: string | null;
+  /** Optional element rendered before the action buttons (the remote access badge). */
+  accessSlot?: ReactNode;
   onRefresh: () => void;
   onRevertLocalCommit: () => Promise<void>;
   onSwitchBranch: (branchName: string) => Promise<boolean>;
@@ -44,6 +46,7 @@ export default function GitPanelHeader({
   isPublishing,
   isRevertingLocalCommit,
   operationError,
+  accessSlot,
   onRefresh,
   onRevertLocalCommit,
   onSwitchBranch,
@@ -230,6 +233,7 @@ export default function GitPanelHeader({
 
         {/* Action buttons */}
         <div className={`flex items-center ${isMobile ? 'gap-1' : 'gap-2'}`}>
+          {accessSlot}
           {remoteStatus?.hasRemote && (
             <>
               {!remoteStatus.hasUpstream ? (

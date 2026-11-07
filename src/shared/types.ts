@@ -1051,6 +1051,53 @@ export type GitRemoteStatus = {
   error?: string;
 };
 
+/** One repository found inside a project folder; `path` is relative to the project and empty for the project itself. */
+export type GitRepositoryEntry = {
+  path: string;
+  name: string;
+  isProjectRoot: boolean;
+  branch: string | null;
+};
+
+/** Payload of the repository discovery endpoint. */
+export type GitRepositoriesResponse = {
+  repositories?: GitRepositoryEntry[];
+  /** True when the scan stopped at its result or time limit. */
+  truncated?: boolean;
+  error?: string;
+  details?: string;
+};
+
+/** Overall outcome of the remote access check shown as a badge in the Source Control header. */
+export type GitRemoteAccessState =
+  | 'read-write'
+  | 'read-only'
+  | 'readable'
+  | 'no-access'
+  | 'not-found'
+  | 'host-key'
+  | 'unreachable'
+  | 'no-remote'
+  | 'error';
+
+/** Payload of the remote access endpoint: whether the credentials git would use can read from and push to the repository's remote. */
+export type GitRemoteAccess = {
+  state?: GitRemoteAccessState;
+  read?: 'ok' | 'denied' | 'unknown';
+  write?: 'ok' | 'denied' | 'unknown';
+  /** `anonymous` when the repository is public (readable without credentials). */
+  readVia?: 'anonymous' | 'credentials' | null;
+  remote?: string | null;
+  url?: string | null;
+  host?: string | null;
+  transport?: 'ssh' | 'https' | 'http' | 'git' | 'local' | null;
+  branch?: string | null;
+  message?: string | null;
+  checkedAt?: string;
+  error?: string;
+  details?: string;
+};
+
 /** One commit in the history list, including the parent hashes and ref decorations the commit graph needs to lay out lanes. */
 export type GitCommitSummary = {
   hash: string;

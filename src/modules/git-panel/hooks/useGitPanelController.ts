@@ -4,6 +4,7 @@ import { api } from '@/shared/api';
 import type { FileOpenHandler, GitApiErrorResponse, GitCommitSummary, GitDiffMap, GitFileDiffResponse, GitOperationResponse, GitPanelView, GitRemoteStatus, GitStatusResponse, Project } from '@/shared/types';
 import { getAllChangedFiles } from '@/modules/git-panel/utils/gitPanelUtils';
 import { useSelectedProvider } from '@/shared/hooks/useSelectedProvider';
+import { getActiveGitRepository, useActiveGitRepository } from '@/shared/gitRepositorySelection';
 
 const DEFAULT_BRANCH = 'main';
 // High enough for the commit graph to show meaningful branch structure.
@@ -80,6 +81,11 @@ type GitFileWithDiffResponse = GitApiErrorResponse & {
   isUntracked?: boolean;
 };
 
+/** Identifies one project + repository pair; responses for any other pair are stale. */
+function gitScopeKey(projectId: string): string {
+  return `${projectId}\u0000${getActiveGitRepository(projectId)}`;
+}
+
 function isAbortError(error: unknown): boolean {
   return error instanceof DOMException && error.name === 'AbortError';
 }
@@ -131,13 +137,16 @@ export function useGitPanelController({
   const [operationError, setOperationError] = useState<string | null>(null);
 
   const clearOperationError = useCallback(() => setOperationError(null), []);
-  // Tracks the DB projectId so async requests can detect stale responses when
-  // the user switches projects mid-flight.
-  const selectedProjectIdRef = useRef<string | null>(selectedProject?.projectId ?? null);
+  // Repository (relative to the project folder) the tab is working on. The API
+  // layer reads the same selection, so requests and this state stay in step.
+  const activeRepo = useActiveGitRepository(selectedProject?.projectId);
+  // Tracks the DB projectId plus repository so async requests can detect stale
+  // responses when the user switches project or repository mid-flight.
+  const selectedScopeRef = useRef<string | null>(selectedProject ? gitScopeKey(selectedProject.projectId) : null);
 
   useEffect(() => {
-    selectedProjectIdRef.current = selectedProject?.projectId ?? null;
-  }, [selectedProject]);
+    selectedScopeRef.current = selectedProject ? gitScopeKey(selectedProject.projectId) : null;
+  }, [selectedProject, activeRepo]);
 
   const provider = useSelectedProvider();
 
@@ -149,6 +158,7 @@ export function useGitPanelController({
 
       // Git endpoints receive the DB projectId via the `project` query param.
       const projectId = selectedProject.projectId;
+    const scope = gitScopeKey(projectId);
 
       try {
         const response = await api.git.diff(projectId, filePath, { signal });
@@ -156,7 +166,7 @@ export function useGitPanelController({
 
         if (
           signal?.aborted ||
-          selectedProjectIdRef.current !== projectId
+          selectedScopeRef.current !== scope
         ) {
           return;
         }
@@ -185,6 +195,7 @@ export function useGitPanelController({
 
     // `project` query param carries the DB projectId everywhere now.
     const projectId = selectedProject.projectId;
+    const scope = gitScopeKey(projectId);
 
     setIsLoading(true);
     try {
@@ -193,7 +204,7 @@ export function useGitPanelController({
 
       if (
         signal?.aborted ||
-        selectedProjectIdRef.current !== projectId
+        selectedScopeRef.current !== scope
       ) {
         return;
       }
@@ -225,7 +236,7 @@ export function useGitPanelController({
       }
 
       if (
-        selectedProjectIdRef.current !== projectId
+        selectedScopeRef.current !== scope
       ) {
         return;
       }
@@ -569,13 +580,14 @@ export function useGitPanelController({
     }
 
     const projectId = selectedProject.projectId;
+    const scope = gitScopeKey(projectId);
 
     setIsLoadingCommits(true);
     try {
       const response = await api.git.commits(projectId, { limit: RECENT_COMMITS_LIMIT });
       const data = await readJson<GitCommitsResponse>(response);
 
-      if (selectedProjectIdRef.current !== projectId) {
+      if (selectedScopeRef.current !== scope) {
         return;
       }
 
@@ -585,7 +597,7 @@ export function useGitPanelController({
     } catch (error) {
       console.error('Error fetching commits:', error);
     } finally {
-      if (selectedProjectIdRef.current === projectId) {
+      if (selectedScopeRef.current === scope) {
         setIsLoadingCommits(false);
         setHasLoadedCommits(true);
       }
@@ -699,13 +711,14 @@ export function useGitPanelController({
       return false;
     }
     const projectId = selectedProject.projectId;
+    const scope = gitScopeKey(projectId);
 
     setIsInitializingRepository(true);
     try {
       const response = await api.git.init(projectId);
 
       const data = await readJson<GitOperationResponse>(response);
-      if (selectedProjectIdRef.current !== projectId) {
+      if (selectedScopeRef.current !== scope) {
         return false;
       }
       if (!data.success) {
@@ -718,7 +731,7 @@ export function useGitPanelController({
       void fetchRemoteStatus();
       return true;
     } catch (error) {
-      if (selectedProjectIdRef.current === projectId) {
+      if (selectedScopeRef.current === scope) {
         setOperationError(error instanceof Error ? error.message : 'Failed to initialize repository');
       }
       return false;
@@ -733,8 +746,11 @@ export function useGitPanelController({
         return;
       }
 
+      // Git reports paths relative to the repository; the editor needs them relative to the project.
+      const editorPath = activeRepo ? `${activeRepo}/${filePath}` : filePath;
+
       if (!selectedProject) {
-        onFileOpen(filePath);
+        onFileOpen(editorPath);
         return;
       }
 
@@ -744,20 +760,20 @@ export function useGitPanelController({
 
         if (data.error) {
           console.error('Error fetching file with diff:', data.error);
-          onFileOpen(filePath);
+          onFileOpen(editorPath);
           return;
         }
 
-        onFileOpen(filePath, {
+        onFileOpen(editorPath, {
           old_string: data.oldContent || '',
           new_string: data.currentContent || '',
         });
       } catch (error) {
         console.error('Error opening file:', error);
-        onFileOpen(filePath);
+        onFileOpen(editorPath);
       }
     },
-    [onFileOpen, selectedProject],
+    [activeRepo, onFileOpen, selectedProject],
   );
 
   const refreshAll = useCallback(() => {
@@ -798,7 +814,7 @@ export function useGitPanelController({
     return () => {
       controller.abort();
     };
-  }, [fetchBranches, fetchGitStatus, fetchRemoteStatus, selectedProject]);
+  }, [activeRepo, fetchBranches, fetchGitStatus, fetchRemoteStatus, selectedProject]);
 
   useEffect(() => {
     if (!selectedProject || activeView !== 'history') {

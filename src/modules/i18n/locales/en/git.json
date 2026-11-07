@@ -2,7 +2,48 @@
   "panel": {
     "selectProject": "Select a project to view source control"
   },
-  "tabs": {
+  "repositories": {
+    "switchTitle": "Switch repository",
+    "choose": "Choose a repository",
+    "projectFolder": "Project folder",
+    "search": "Search repositories...",
+    "noMatch": "No matching repositories",
+    "rescan": "Rescan for repositories",
+    "truncated": "Only the first repositories found are listed."
+  },
+  "remoteAccess": {
+    "title": "Remote access",
+    "checking": "Checking...",
+    "notChecked": "Remote access",
+    "checkNow": "Check access",
+    "checkAgain": "Check again",
+    "autoCheck": "Check when a repository opens",
+    "public": "Public repository: it can be read without credentials.",
+    "remote": "Remote",
+    "checkedAt": "Checked",
+    "state": {
+      "readWrite": "Read & write",
+      "readOnly": "Read only",
+      "readable": "Readable",
+      "noAccess": "No access",
+      "notFound": "Not found",
+      "hostKey": "Host key",
+      "unreachable": "Unreachable",
+      "noRemote": "No remote",
+      "error": "Check failed"
+    },
+    "hint": {
+      "readWrite": "Fetch, pull and push are expected to work. Branch protection is only checked by a real push.",
+      "readOnly": "The remote can be read, but the credentials in use are not allowed to push.",
+      "readable": "The remote can be read. Whether pushing works could not be determined.",
+      "noAccess": "The remote rejected the credentials in use, or none are configured for it.",
+      "notFound": "The repository was not found, or the credentials in use cannot see it.",
+      "hostKey": "The SSH server's host key is not trusted yet or has changed. Connect to it once with ssh to accept it.",
+      "unreachable": "The remote did not answer. Check the network and the remote address.",
+      "noRemote": "This repository has no remote.",
+      "error": "The access check failed."
+    }
+  },  "tabs": {
     "changes": "Changes",
     "compare": "Compare",
     "history": "Commits",
