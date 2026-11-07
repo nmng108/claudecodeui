@@ -9,6 +9,8 @@ const SEARCH_RESULT_LIMIT = 200;
 
 type UseFileTreeSearchArgs = {
   projectId: string | undefined;
+  /** Include gitignored files in the results. */
+  showIgnoredFiles?: boolean;
 };
 
 type UseFileTreeSearchResult = {
@@ -31,7 +33,7 @@ type UseFileTreeSearchResult = {
  * so most of the project is never in the browser and a client-side filter
  * would only see what the user happened to expand.
  */
-export function useFileTreeSearch({ projectId }: UseFileTreeSearchArgs): UseFileTreeSearchResult {
+export function useFileTreeSearch({ projectId, showIgnoredFiles = false }: UseFileTreeSearchArgs): UseFileTreeSearchResult {
   const [searchQuery, setSearchQuery] = useState('');
   const [response, setResponse] = useState<{ projectId: string; query: string; data: FileTreeSearchResponse } | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -54,7 +56,7 @@ export function useFileTreeSearch({ projectId }: UseFileTreeSearchArgs): UseFile
       try {
         const result = await api.searchFiles(
           projectId,
-          { query: trimmedQuery, limit: SEARCH_RESULT_LIMIT },
+          { query: trimmedQuery, limit: SEARCH_RESULT_LIMIT, respectGitignore: !showIgnoredFiles },
           { signal: controller.signal },
         );
         if (!result.ok) {
@@ -83,7 +85,7 @@ export function useFileTreeSearch({ projectId }: UseFileTreeSearchArgs): UseFile
       clearTimeout(timer);
       controller.abort();
     };
-  }, [projectId, trimmedQuery]);
+  }, [projectId, trimmedQuery, showIgnoredFiles]);
 
   // The previous query's hits stay on screen while the next ones load, instead
   // of flashing an empty state on every keystroke; a different project's never show.

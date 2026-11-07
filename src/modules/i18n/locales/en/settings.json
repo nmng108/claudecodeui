@@ -212,6 +212,11 @@
       "section": "Sidebar",
       "label": "Keep projects expanded",
       "description": "Open several projects together and remember them after reloading."
+    },
+    "showIgnoredFiles": {
+      "section": "File tree",
+      "label": "Show ignored files",
+      "description": "List files and folders excluded by .gitignore in the file tree and its search."
     }
   },
   "mcpForm": {

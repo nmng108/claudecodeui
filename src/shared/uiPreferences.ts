@@ -16,6 +16,8 @@ export type UiPreferences = {
   sidebarVisible: boolean;
   keepProjectsExpanded: boolean;
   voiceEnabled: boolean;
+  /** Lists gitignored files and folders in the file tree and its search; hidden by default. */
+  showIgnoredFiles: boolean;
 };
 
 export type UiPreferenceKey = keyof UiPreferences;
@@ -31,6 +33,7 @@ const DEFAULTS: UiPreferences = {
   sidebarVisible: true,
   keepProjectsExpanded: false,
   voiceEnabled: false,
+  showIgnoredFiles: false,
 };
 
 const PREFERENCE_KEYS = Object.keys(DEFAULTS) as UiPreferenceKey[];

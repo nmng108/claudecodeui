@@ -95,6 +95,21 @@ export default function AppearanceSettingsTab({
         </SettingsCard>
       </SettingsSection>
 
+      <SettingsSection title={t('appearanceSettings.showIgnoredFiles.section', { defaultValue: 'File tree' })}>
+        <SettingsCard>
+          <SettingsRow
+            label={t('appearanceSettings.showIgnoredFiles.label', { defaultValue: 'Show ignored files' })}
+            description={t('appearanceSettings.showIgnoredFiles.description', { defaultValue: 'List files and folders excluded by .gitignore in the file tree and its search.' })}
+          >
+            <SettingsToggle
+              checked={preferences.showIgnoredFiles}
+              onChange={(value) => setPreference('showIgnoredFiles', value)}
+              ariaLabel={t('appearanceSettings.showIgnoredFiles.label', { defaultValue: 'Show ignored files' })}
+            />
+          </SettingsRow>
+        </SettingsCard>
+      </SettingsSection>
+
       <SettingsSection title={t('appearanceSettings.codeEditor.title')}>
         <SettingsCard divided>
           <SettingsRow

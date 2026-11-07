@@ -313,9 +313,14 @@ export const api = {
     put(`/api/file-tree/projects/${projectId}/file`, { filePath, content }),
   // One directory level (the project root when `directoryPath` is omitted). The
   // tree loads a folder's children when the folder is expanded.
-  listFiles: (projectId: string, directoryPath?: string | null, options: ApiRequestOptions = {}) =>
+  // Gitignored entries are hidden unless `respectGitignore` is false.
+  listFiles: (
+    projectId: string,
+    directoryPath?: string | null,
+    { respectGitignore = true, ...options }: ApiRequestOptions & { respectGitignore?: boolean } = {},
+  ) =>
     get(
-      `/api/file-tree/projects/${projectId}/files${query({ path: directoryPath, respectGitignore: true })}`,
+      `/api/file-tree/projects/${projectId}/files${query({ path: directoryPath, respectGitignore })}`,
       options,
     ),
   // Server-side search over the whole project, so large workspaces never have

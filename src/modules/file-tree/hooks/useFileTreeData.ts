@@ -39,8 +39,9 @@ async function fetchDirectory(
   projectId: string,
   directoryPath: string | null,
   signal: AbortSignal,
+  respectGitignore: boolean,
 ): Promise<FileTreeListing> {
-  const response = await api.listFiles(projectId, directoryPath, { signal });
+  const response = await api.listFiles(projectId, directoryPath, { signal, respectGitignore });
   if (!response.ok) {
     const errorText = await response.text();
     console.error('File fetch failed:', response.status, errorText);
@@ -66,7 +67,11 @@ const isAbortError = (error: unknown) => (error as { name?: string })?.name === 
  * folder's children are fetched when it is first expanded, so a workspace with
  * hundreds of thousands of files costs only the folders actually opened.
  */
-export function useFileTreeData(selectedProject: Project | null): UseFileTreeDataResult {
+export function useFileTreeData(
+  selectedProject: Project | null,
+  { showIgnoredFiles = false }: { showIgnoredFiles?: boolean } = {},
+): UseFileTreeDataResult {
+  const respectGitignore = !showIgnoredFiles;
   const [rootEntries, setRootEntries] = useState<FileTreeNode[]>([]);
   const [childrenByPath, setChildrenByPath] = useState<Record<string, FileTreeNode[]>>({});
   const [loadingDirectories, setLoadingDirectories] = useState<ReadonlySet<string>>(() => new Set());
@@ -125,9 +130,9 @@ export function useFileTreeData(selectedProject: Project | null): UseFileTreeDat
       setError(null);
       try {
         const [rootListing, ...reloaded] = await Promise.all([
-          fetchDirectory(projectId, null, controller.signal),
+          fetchDirectory(projectId, null, controller.signal, respectGitignore),
           // A folder deleted or renamed since it was opened simply drops out.
-          ...directoriesToReload.map((directoryPath) => fetchDirectory(projectId, directoryPath, controller.signal)
+          ...directoriesToReload.map((directoryPath) => fetchDirectory(projectId, directoryPath, controller.signal, respectGitignore)
             .then((listing) => ({ directoryPath, entries: listing.entries }))
             .catch((reloadError: unknown) => {
               if (isAbortError(reloadError)) throw reloadError;
@@ -166,7 +171,8 @@ export function useFileTreeData(selectedProject: Project | null): UseFileTreeDat
     return () => {
       controller.abort();
     };
-  }, [projectId, refreshKey]);
+  // Flipping the ignored-files switch reloads the root and every opened folder.
+  }, [projectId, refreshKey, respectGitignore]);
 
   const loadDirectory = useCallback((directoryPath: string) => {
     if (!projectId || requestedRef.current.has(directoryPath)) {
@@ -189,7 +195,7 @@ export function useFileTreeData(selectedProject: Project | null): UseFileTreeDat
       });
     };
 
-    fetchDirectory(projectId, directoryPath, signal)
+    fetchDirectory(projectId, directoryPath, signal, respectGitignore)
       .then((listing) => {
         if (generation !== generationRef.current) {
           return;
@@ -206,7 +212,7 @@ export function useFileTreeData(selectedProject: Project | null): UseFileTreeDat
         setChildrenByPath((previous) => ({ ...previous, [directoryPath]: [] }));
       })
       .finally(finish);
-  }, [projectId]);
+  }, [projectId, respectGitignore]);
 
   const files = useMemo(() => attachChildren(rootEntries, childrenByPath), [rootEntries, childrenByPath]);
 

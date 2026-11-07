@@ -3,6 +3,7 @@ import type { ChangeEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, Check, X, Loader2, Folder, Upload } from 'lucide-react';
 
+import { useUiPreferences } from '@/shared/context/UiPreferencesContext';
 import { cn } from '@/shared/utils';
 import { ICON_SIZE_CLASS, getFileIconData } from '@/modules/file-tree/utils/fileIcons';
 import { useExpandedDirectories } from '@/modules/file-tree/hooks/useExpandedDirectories';
@@ -34,6 +35,7 @@ type FileTreeProps = {
 /** Exported through the file-tree barrel; the project-workspace module renders it as the Files sidebar tab. */
 export default function FileTree({ selectedProject, onFileOpen, revealDirectory }: FileTreeProps) {
   const { t } = useTranslation();
+  const { showIgnoredFiles } = useUiPreferences();
   const [selectedImage, setSelectedImage] = useState<FileTreeImageSelection | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const newItemInputRef = useRef<HTMLInputElement>(null);
@@ -52,7 +54,7 @@ export default function FileTree({ selectedProject, onFileOpen, revealDirectory 
     }
   }, [toast]);
 
-  const { files, loading, error, refreshFiles, loadDirectory } = useFileTreeData(selectedProject);
+  const { files, loading, error, refreshFiles, loadDirectory } = useFileTreeData(selectedProject, { showIgnoredFiles });
   const { viewMode, changeViewMode } = useFileTreeViewMode();
   const { expandedDirs, toggleDirectory, expandDirectories, collapseAll } = useExpandedDirectories();
   const {
@@ -64,7 +66,10 @@ export default function FileTree({ selectedProject, onFileOpen, revealDirectory 
     searchLoading,
     searchTruncated,
     searchError,
-  } = useFileTreeSearch({ projectId: selectedProject?.projectId });
+  } = useFileTreeSearch({
+    projectId: selectedProject?.projectId,
+    showIgnoredFiles,
+  });
 
   // Folders load when they are expanded, whether by a click, a reveal request
   // or a restored state. Requests are de-duplicated by the data hook, so
