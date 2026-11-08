@@ -128,7 +128,7 @@ services:
       - ${WORKSPACE_PATH:-./}:/workspace
     ports:
       # Published to this machine only (localhost), not to the network.
-      - '127.0.0.1:${DIND_PORTS:-8080-8089}:${DIND_PORTS:-8080-8089}'
+      - '127.0.0.1:${DIND_PORTS:-7080-7089}:${DIND_PORTS:-7080-7089}'
     networks:
       dockernet:
         aliases: [dind]
@@ -157,7 +157,7 @@ services:
       - dind-certs-client:/certs/client
       - ${WORKSPACE_PATH:-./}:/workspace
     ports:
-      - '127.0.0.1:${DIND_PORTS:-8080-8089}:${DIND_PORTS:-8080-8089}'
+      - '127.0.0.1:${DIND_PORTS:-7080-7089}:${DIND_PORTS:-7080-7089}'
     networks:
       dockernet:
         aliases: [dind]

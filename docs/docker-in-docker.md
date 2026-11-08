@@ -54,7 +54,7 @@ An agent working in the app container should be able to build images, run contai
   stack, or `$HOME`) exist only in the app container; the daemon does not see them.
 - **Ports.** Containers an agent starts with `-p 8080:80` are published by the daemon.
   - From the app container (and the agents): `http://dind:8080`.
-  - From your machine: the daemon service publishes `DIND_PORTS` (default `8080-8089`) **on
+  - From your machine: the daemon service publishes `DIND_PORTS` (default `7080-7089`) **on
     localhost only** (`127.0.0.1`), so `http://localhost:8080` works and other machines on the
     network cannot reach it. A port already used on your host makes the service fail to start;
     change the range in `.env.compose`.
@@ -66,7 +66,7 @@ An agent working in the app container should be able to build images, run contai
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `DIND_PORTS` | `8080-8089` | Host port range published (on localhost) by the daemon container. |
+| `DIND_PORTS` | `7080-7089` | Host port range published (on localhost) by the daemon container. |
 | `DIND_MEMORY` | `6g` | Memory limit of the daemon container, and so of everything it runs. |
 | `DIND_PIDS` | `4096` | Process limit of the daemon container. |
 | `DIND_IMAGE` | `docker:29-dind-rootless` | Rootless daemon image. Keep its major version equal to the CLI's (`DOCKER_VERSION` build argument, default 29). |
