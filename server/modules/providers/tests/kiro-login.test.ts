@@ -112,6 +112,62 @@ test('sign-in succeeds: URL and code are reported, then the CLI login shows up',
   });
 });
 
+test('a recent CLI that reports the account at the top level, followed by text, still counts as signed in', async () => {
+  await withFakeCli('success', async (dir) => {
+    const home = await mkdtemp(path.join(os.tmpdir(), 'kiro-login-home-'));
+    const savedHome = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+    process.env.HOME = home;
+    process.env.USERPROFILE = home;
+    process.env.KIRO_FAKE_WHOAMI_SHAPE = 'flat';
+    try {
+      delete process.env.KIRO_API_KEY;
+      assert.equal(await getKiroCliLogin(), null);
+
+      await writeFile(path.join(dir, 'token'), 'token');
+      resetKiroLoginForTesting();
+      assert.deepEqual(await getKiroCliLogin(), { label: 'dev@example.com' });
+
+      const auth = new KiroProviderAuth();
+      auth.checkInstalled = () => ({ installed: true, exitCode: 0, version: '2.37.1' });
+      resetKiroLoginForTesting();
+      const status = await auth.getStatus();
+      assert.equal(status.authenticated, true);
+      assert.equal(status.method, 'cli_login');
+    } finally {
+      delete process.env.KIRO_FAKE_WHOAMI_SHAPE;
+      for (const [name, value] of Object.entries(savedHome)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
+test('Identity Center sign-in runs in a terminal, confirms the prompts and reports the CLI verification URL', async () => {
+  await withFakeCli('success', async (dir) => {
+    const started = await startKiroLogin({
+      method: 'identity-center',
+      startUrl: 'https://example.awsapps.com/start',
+      region: 'ap-southeast-1',
+    });
+    // The prompts echo the start URL; it must not be mistaken for the verification URL.
+    assert.equal(started.status, 'awaiting_confirmation');
+    assert.equal(started.verificationUrl, 'https://view.awsapps.com/start/#/device?user_code=ABCD-EFGH');
+    assert.equal(started.userCode, 'ABCD-EFGH');
+
+    await waitForStatus('succeeded');
+    const [recorded] = (await readFile(path.join(dir, 'login-args.txt'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    assert.deepEqual(recorded.args, [
+      '--license', 'pro',
+      '--identity-provider', 'https://example.awsapps.com/start',
+      '--region', 'ap-southeast-1',
+      '--use-device-flow',
+    ]);
+    assert.equal(recorded.hasApiKey, false);
+  });
+});
+
 test('sign-in failure reports the CLI error, without progress-bar noise', async () => {
   await withFakeCli('fail', async () => {
     await startKiroLogin({ method: 'builder-id' });

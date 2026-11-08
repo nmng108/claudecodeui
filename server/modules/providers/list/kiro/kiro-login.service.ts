@@ -1,6 +1,7 @@
 import type { ChildProcess } from 'node:child_process';
 
 import spawn from 'cross-spawn';
+import pty from 'node-pty';
 
 import { resolveKiroCliCommand } from '@/modules/providers/list/kiro/kiro-acp.client.js';
 import { AppError } from '@/shared/utils.js';
@@ -14,6 +15,13 @@ import { AppError } from '@/shared/utils.js';
  * runs that command as a child process, reads the URL and code from its
  * output for the UI, and reports when the CLI exits. The CLI stores the
  * resulting token itself (`~/.local/share/kiro-cli`); nothing is stored here.
+ *
+ * Identity Center needs a terminal. When stdout is not a terminal the CLI skips
+ * its "Enter Start URL" / "Enter Region" prompts and sends an empty region, which
+ * fails with "failed to construct request". That sign-in therefore runs in a
+ * pseudo-terminal, and the prompts (already filled in from the flags) are
+ * confirmed with Enter. Builder ID prints its code without any prompt and keeps
+ * using plain pipes.
  *
  * Only one sign-in runs at a time. Starting another cancels the previous one.
  */
@@ -66,8 +74,19 @@ const IDLE_STATE: KiroLoginState = {
   error: null,
 };
 
+/** What the service needs from a running login command, whether it runs on pipes or in a pseudo-terminal. */
+type LoginProcess = {
+  onOutput(listener: (chunk: string) => void): void;
+  onError(listener: (error: Error) => void): void;
+  onExit(listener: (code: number | null) => void): void;
+  write(text: string): void;
+  kill(): void;
+};
+
 type ActiveLogin = {
-  child: ChildProcess;
+  proc: LoginProcess;
+  /** Prompts the CLI shows only on a terminal; each is confirmed with Enter once, as the flags already filled in the answer. */
+  pendingPrompts: RegExp[];
   output: string;
   timeout: NodeJS.Timeout;
   cancelled: boolean;
@@ -90,6 +109,62 @@ function killProcess(child: ChildProcess): void {
 
 function stripAnsi(text: string): string {
   return text.replace(ANSI_PATTERN, '');
+}
+
+/** Identity Center prompts that appear only on a terminal, in the order the CLI asks them. */
+const IDENTITY_CENTER_PROMPTS = [/Enter Start URL/, /Enter Region/];
+
+/** Runs the login command on plain pipes (no terminal). */
+function spawnPipedLogin(args: string[], env: NodeJS.ProcessEnv): LoginProcess {
+  const child = spawn(resolveKiroCliCommand(), args, {
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+  return {
+    onOutput: (listener) => {
+      child.stdout?.on('data', (chunk: Buffer) => listener(chunk.toString('utf8')));
+      child.stderr?.on('data', (chunk: Buffer) => listener(chunk.toString('utf8')));
+    },
+    onError: (listener) => child.on('error', listener),
+    onExit: (listener) => child.on('close', listener),
+    write: () => {},
+    kill: () => killProcess(child),
+  };
+}
+
+/** Runs the login command in a pseudo-terminal, so the CLI behaves as it does in an interactive shell. */
+function spawnPtyLogin(args: string[], env: NodeJS.ProcessEnv): LoginProcess {
+  const textEnv: Record<string, string> = {};
+  for (const [name, value] of Object.entries(env)) {
+    if (typeof value === 'string') {
+      textEnv[name] = value;
+    }
+  }
+  const errorListeners: Array<(error: Error) => void> = [];
+  let term: pty.IPty;
+  try {
+    // Wide enough that the CLI never wraps the verification URL across lines.
+    term = pty.spawn(resolveKiroCliCommand(), args, { name: 'dumb', cols: 500, rows: 30, env: textEnv });
+  } catch (error) {
+    // Report a spawn failure the same way a failed pipe spawn is reported: asynchronously, once listeners exist.
+    const failure = error instanceof Error ? error : new Error(String(error));
+    queueMicrotask(() => errorListeners.forEach((listener) => listener(failure)));
+    return { onOutput: () => {}, onError: (listener) => errorListeners.push(listener), onExit: () => {}, write: () => {}, kill: () => {} };
+  }
+  return {
+    onOutput: (listener) => term.onData(listener),
+    onError: (listener) => errorListeners.push(listener),
+    onExit: (listener) => term.onExit(({ exitCode }) => listener(exitCode)),
+    write: (text) => term.write(text),
+    kill: () => {
+      try {
+        term.kill();
+      } catch {
+        // Already exited.
+      }
+    },
+  };
 }
 
 /** Validates the Identity Center inputs and returns the CLI arguments for the chosen method. */
@@ -149,10 +224,19 @@ export function buildKiroLoginArgs(input: KiroLoginInput): string[] {
   ];
 }
 
-/** Pulls the verification URL and code out of the CLI's (ANSI-stripped) output. */
-export function parseKiroLoginOutput(rawOutput: string): { verificationUrl: string | null; userCode: string | null } {
+/**
+ * Pulls the verification URL and code out of the CLI's (ANSI-stripped) output.
+ * With `onlyOpenUrlLine`, any other `https://` URL in the output is ignored. A terminal
+ * sign-in needs this: its prompts echo the user's own start URL before the real
+ * verification URL is printed.
+ */
+export function parseKiroLoginOutput(
+  rawOutput: string,
+  onlyOpenUrlLine = false,
+): { verificationUrl: string | null; userCode: string | null } {
   const text = stripAnsi(rawOutput);
-  const url = OPEN_URL_PATTERN.exec(text)?.[1] ?? ANY_HTTPS_URL_PATTERN.exec(text)?.[1] ?? null;
+  const url = OPEN_URL_PATTERN.exec(text)?.[1]
+    ?? (onlyOpenUrlLine ? null : ANY_HTTPS_URL_PATTERN.exec(text)?.[1] ?? null);
   const userCode = USER_CODE_PATTERN.exec(text)?.[1] ?? null;
   return { verificationUrl: url, userCode };
 }
@@ -194,39 +278,45 @@ export async function startKiroLogin(input: KiroLoginInput): Promise<KiroLoginSt
   const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: '1', TERM: 'dumb' };
   delete env.KIRO_API_KEY;
 
-  const child = spawn(resolveKiroCliCommand(), args, {
-    env,
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-  });
+  const needsTerminal = input.method === 'identity-center';
+  const proc = needsTerminal ? spawnPtyLogin(args, env) : spawnPipedLogin(args, env);
   const login: ActiveLogin = {
-    child,
+    proc,
+    pendingPrompts: needsTerminal ? [...IDENTITY_CENTER_PROMPTS] : [],
     output: '',
     cancelled: false,
     finished: false,
     timeout: setTimeout(() => {
       login.cancelled = true;
-      killProcess(child);
+      proc.kill();
       finish(login, { status: 'failed', error: 'The sign-in timed out. Start it again.' });
     }, LOGIN_TIMEOUT_MS),
   };
   active = login;
   state = { ...IDLE_STATE, status: 'starting', method: input.method };
 
-  const onData = (chunk: Buffer) => {
-    login.output = (login.output + chunk.toString('utf8')).slice(-MAX_OUTPUT_CHARS);
-    if (state.status !== 'starting' || active !== login) {
+  const onData = (chunk: string) => {
+    login.output = (login.output + chunk).slice(-MAX_OUTPUT_CHARS);
+    if (active !== login) {
       return;
     }
-    const { verificationUrl, userCode } = parseKiroLoginOutput(login.output);
+    // A prompt's text is printed before the CLI reads its answer, so Enter sent now is not lost.
+    const visible = stripAnsi(login.output);
+    while (login.pendingPrompts.length > 0 && login.pendingPrompts[0].test(visible)) {
+      login.pendingPrompts.shift();
+      proc.write('\r');
+    }
+    if (state.status !== 'starting') {
+      return;
+    }
+    const { verificationUrl, userCode } = parseKiroLoginOutput(login.output, needsTerminal);
     if (verificationUrl) {
       setState({ status: 'awaiting_confirmation', verificationUrl, userCode });
     }
   };
-  child.stdout?.on('data', onData);
-  child.stderr?.on('data', onData);
+  proc.onOutput(onData);
 
-  child.on('error', (error) => {
+  proc.onError((error) => {
     const missing = (error as NodeJS.ErrnoException).code === 'ENOENT';
     finish(login, {
       status: 'failed',
@@ -234,7 +324,7 @@ export async function startKiroLogin(input: KiroLoginInput): Promise<KiroLoginSt
     });
   });
 
-  child.on('close', (code) => {
+  proc.onExit((code) => {
     if (login.cancelled || login.finished) {
       return;
     }
@@ -263,7 +353,7 @@ export function cancelKiroLogin(): KiroLoginState {
   const login = active;
   if (login) {
     login.cancelled = true;
-    killProcess(login.child);
+    login.proc.kill();
     finish(login, { ...IDLE_STATE, status: 'cancelled', method: state.method });
   }
   return getKiroLoginState();
@@ -319,6 +409,25 @@ function runKiroCli(args: string[], timeoutMs: number): Promise<{ code: number |
 }
 
 /**
+ * Reads the account from `kiro-cli whoami --format json`. Two shapes exist:
+ * `{"account": {...} | null}` (nothing or an account object), and, for recent CLIs,
+ * the account fields at the top level (`{"accountType", "email", "startUrl", ...}`)
+ * followed by non-JSON text such as the "Profile:" lines. Only the first JSON line
+ * is read, and a signed-out CLI reports `{"account": null}`.
+ */
+function parseWhoamiAccount(stdout: string): unknown {
+  const jsonLine = stdout.split(/\r?\n/).find((line) => line.trim().startsWith('{'));
+  if (!jsonLine) {
+    return null;
+  }
+  const parsed = JSON.parse(jsonLine) as Record<string, unknown> | null;
+  if (!parsed || typeof parsed !== 'object') {
+    return null;
+  }
+  return 'account' in parsed ? parsed.account : parsed;
+}
+
+/**
  * Whether `kiro-cli` holds a sign-in (`kiro-cli whoami --format json` reports
  * an account). Cached for a few seconds because auth status is polled.
  */
@@ -331,9 +440,9 @@ export async function getKiroCliLogin(): Promise<KiroCliLogin | null> {
   let value: KiroCliLogin | null = null;
   if (result) {
     try {
-      const parsed = JSON.parse(result.stdout.trim()) as { account?: unknown } | null;
-      if (parsed && parsed.account) {
-        value = { label: describeAccount(parsed.account) };
+      const account = parseWhoamiAccount(result.stdout);
+      if (account) {
+        value = { label: describeAccount(account) };
       }
     } catch {
       value = null;
