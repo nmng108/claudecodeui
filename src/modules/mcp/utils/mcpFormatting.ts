@@ -75,6 +75,33 @@ export const getProjectPath = (project: { fullPath?: string; path?: string }): s
   project.fullPath || project.path || ''
 );
 
+/** Pulls the human-readable message out of the API's error envelope, falling back to the given text. */
+export const getApiErrorMessage = (payload: unknown, fallback: string): string => {
+  if (!payload || typeof payload !== 'object') {
+    return fallback;
+  }
+
+  const record = payload as Record<string, unknown>;
+  const error = record.error;
+  if (error && typeof error === 'object') {
+    const message = (error as Record<string, unknown>).message;
+    if (typeof message === 'string' && message.trim()) {
+      return message;
+    }
+  }
+
+  if (typeof error === 'string' && error.trim()) {
+    return error;
+  }
+
+  const details = record.details;
+  if (typeof details === 'string' && details.trim()) {
+    return details;
+  }
+
+  return fallback;
+};
+
 export const getErrorMessage = (error: unknown): string => (
   error instanceof Error ? error.message : 'Unknown error'
 );

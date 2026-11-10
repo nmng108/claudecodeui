@@ -533,6 +533,21 @@ export const api = {
       del(
         `/api/providers/${provider}/mcp/servers/${encodeURIComponent(serverName)}${query({ scope, workspacePath })}`,
       ),
+    mcpRawConfig: (
+      provider: string,
+      { scope, workspacePath }: { scope: string; workspacePath?: string },
+    ) => get(`/api/providers/${provider}/mcp/config${query({ scope, workspacePath })}`),
+    saveMcpRawConfig: (
+      provider: string,
+      payload: {
+        scope: string;
+        workspacePath?: string;
+        content: string;
+        mode: 'replace' | 'merge';
+        expectedHash?: string;
+        dryRun?: boolean;
+      },
+    ) => put(`/api/providers/${provider}/mcp/config`, payload),
     setMcpServerEnabled: (
       provider: string,
       serverName: string,

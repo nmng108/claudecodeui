@@ -1278,6 +1278,32 @@ export type ProviderMcpServer = {
   projectDisplayName?: string;
 };
 
+/** The success/failure envelope the provider MCP API wraps every response in; narrow on `success` before reading `data` or `error`. */
+export type McpApiResponse<T> =
+  | { success: true; data: T }
+  | { success: false; error?: { code?: string; message?: string; details?: unknown } };
+
+/** The raw text of a provider's MCP config for one scope, as returned by the raw config API and edited in the raw editor; `hash` must be sent back on save so a file that changed meanwhile is not overwritten. */
+export type ProviderMcpRawConfig = {
+  provider: McpProvider;
+  scope: McpScope;
+  filePath: string;
+  format: 'json' | 'jsonc' | 'toml';
+  content: string;
+  exists: boolean;
+  hash: string;
+  /** True when `content` is only the MCP section of a larger shared file (Claude's ~/.claude.json). */
+  partial: boolean;
+};
+
+/** What saving or previewing a raw MCP config edit did (or would do): the resulting config plus the server names added, changed and removed. */
+export type ProviderMcpRawConfigWriteResult = ProviderMcpRawConfig & {
+  added: string[];
+  changed: string[];
+  removed: string[];
+  written: boolean;
+};
+
 /** The complete editable state of the MCP server form, covering the structured connection fields and the raw JSON import text; convert it with createMcpPayloadFromForm before sending it to the API. */
 export type McpFormState = {
   name: string;

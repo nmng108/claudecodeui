@@ -1,4 +1,5 @@
-import { Edit3, ExternalLink, Globe, Lock, Plus, Server, Terminal, Trash2, Users, Zap } from 'lucide-react';
+import { Edit3, ExternalLink, FileJson, Globe, Lock, Plus, Server, Terminal, Trash2, Users, Zap } from 'lucide-react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { McpProject, McpProvider, McpScope, ProviderMcpServer } from '@/shared/types';
@@ -8,6 +9,7 @@ import { MCP_GLOBAL_SUPPORTED_TRANSPORTS, MCP_PROVIDER_NAMES, MCP_SUPPORTS_ENABL
 import { useMcpServers } from '@/modules/mcp/hooks/useMcpServers';
 import { maskSecret } from '@/modules/mcp/utils/mcpFormatting';
 import McpServerFormModal from '@/modules/mcp/McpServerFormModal';
+import McpRawConfigModal from '@/modules/mcp/McpRawConfigModal';
 
 type McpServersProps = {
   selectedProvider: McpProvider;
@@ -140,7 +142,11 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
     submitGlobalForm,
     deleteServer,
     toggleServerEnabled,
+    reloadServers,
   } = useMcpServers({ selectedProvider, currentProjects });
+
+  // Whether the raw config editor is open; local to this list since nothing else needs it.
+  const [isRawEditorOpen, setIsRawEditorOpen] = useState(false);
 
   const providerName = MCP_PROVIDER_NAMES[selectedProvider];
   const description = t(`mcpServers.description.${selectedProvider}`, {
@@ -162,6 +168,11 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
             <p className="text-sm text-muted-foreground">{description}</p>
           </div>
         </div>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+        <Button variant="outline" onClick={() => setIsRawEditorOpen(true)} className="w-full sm:w-auto">
+          <FileJson className="mr-2 h-4 w-4" />
+          {t('mcpRaw.openButton', { defaultValue: 'Edit config' })}
+        </Button>
         <ActionMenu
           label={t('mcpServersAdd.menuLabel')}
           icon={Plus}
@@ -184,7 +195,7 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
             },
           ]}
         />
-
+        </div>
       </div>
 
       <div className="space-y-2">
@@ -334,6 +345,15 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
           submitLabel={providerButtonLabel}
           onClose={closeForm}
           onSubmit={submitForm}
+        />
+      )}
+
+      {isRawEditorOpen && (
+        <McpRawConfigModal
+          provider={selectedProvider}
+          currentProjects={currentProjects}
+          onClose={() => setIsRawEditorOpen(false)}
+          onSaved={reloadServers}
         />
       )}
 

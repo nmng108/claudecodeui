@@ -3,9 +3,10 @@ import { useTranslation } from 'react-i18next';
 
 import { api } from '@/shared/api';
 import { MCP_GLOBAL_SUPPORTED_TRANSPORTS, MCP_PROVIDER_NAMES, MCP_SUPPORTED_SCOPES } from '@/shared/constants';
-import type { McpFormState, McpProject, McpProvider, McpScope, McpTransport, ProviderMcpServer, UpsertProviderMcpServerPayload } from '@/shared/types';
+import type { McpApiResponse, McpFormState, McpProject, McpProvider, McpScope, McpTransport, ProviderMcpServer, UpsertProviderMcpServerPayload } from '@/shared/types';
 import {
   createMcpPayloadFromForm,
+  getApiErrorMessage,
   getErrorMessage,
   getProjectPath,
   isMcpScope,
@@ -17,22 +18,6 @@ type GlobalMcpServerResult = {
   created: boolean;
   error?: string;
 };
-
-type ApiSuccessResponse<T> = {
-  success: true;
-  data: T;
-};
-
-type ApiErrorResponse = {
-  success: false;
-  error?: {
-    code?: string;
-    message?: string;
-    details?: unknown;
-  };
-};
-
-type ApiResponse<T> = ApiSuccessResponse<T> | ApiErrorResponse;
 
 type ProviderMcpServerResponse = {
   provider: McpProvider;
@@ -69,32 +54,6 @@ const mcpServersCache = new Map<string, McpServersCacheEntry>();
 // cache prevents those tab switches from refetching every project config file.
 
 const toResponseJson = async <T>(response: Response): Promise<T> => response.json() as Promise<T>;
-
-const getApiErrorMessage = (payload: unknown, fallback: string): string => {
-  if (!payload || typeof payload !== 'object') {
-    return fallback;
-  }
-
-  const record = payload as Record<string, unknown>;
-  const error = record.error;
-  if (error && typeof error === 'object') {
-    const message = (error as Record<string, unknown>).message;
-    if (typeof message === 'string' && message.trim()) {
-      return message;
-    }
-  }
-
-  if (typeof error === 'string' && error.trim()) {
-    return error;
-  }
-
-  const details = record.details;
-  if (typeof details === 'string' && details.trim()) {
-    return details;
-  }
-
-  return fallback;
-};
 
 const normalizeTransport = (value: unknown, fallback: McpTransport = 'stdio'): McpTransport => (
   isMcpTransport(value) ? value : fallback
@@ -163,7 +122,7 @@ const fetchProviderScopeServers = async (
     scope,
     workspacePath: project?.path,
   });
-  const data = await toResponseJson<ApiResponse<ProviderMcpServerResponse>>(response);
+  const data = await toResponseJson<McpApiResponse<ProviderMcpServerResponse>>(response);
 
   if (!response.ok || !data.success) {
     throw new Error(getApiErrorMessage(data, `Failed to load ${provider} MCP servers`));
@@ -180,7 +139,7 @@ const deleteProviderServer = async (
     scope: server.scope,
     workspacePath: server.workspacePath,
   });
-  const data = await toResponseJson<ApiResponse<{ removed: boolean }>>(response);
+  const data = await toResponseJson<McpApiResponse<{ removed: boolean }>>(response);
 
   if (!response.ok || !data.success) {
     throw new Error(getApiErrorMessage(data, 'Failed to delete MCP server'));
@@ -197,7 +156,7 @@ const setProviderServerEnabled = async (
     scope: server.scope,
     workspacePath: server.workspacePath,
   });
-  const data = await toResponseJson<ApiResponse<{ server: ProviderMcpServer }>>(response);
+  const data = await toResponseJson<McpApiResponse<{ server: ProviderMcpServer }>>(response);
 
   if (!response.ok || !data.success) {
     throw new Error(getApiErrorMessage(data, 'Failed to update MCP server'));
@@ -209,7 +168,7 @@ const saveProviderServer = async (
   payload: UpsertProviderMcpServerPayload,
 ): Promise<void> => {
   const response = await api.providers.saveMcpServer(provider, payload);
-  const data = await toResponseJson<ApiResponse<{ server: ProviderMcpServer }>>(response);
+  const data = await toResponseJson<McpApiResponse<{ server: ProviderMcpServer }>>(response);
 
   if (!response.ok || !data.success) {
     throw new Error(getApiErrorMessage(data, 'Failed to save MCP server'));
@@ -220,7 +179,7 @@ const saveGlobalServer = async (
   payload: UpsertProviderMcpServerPayload,
 ): Promise<GlobalMcpServerResult[]> => {
   const response = await api.providers.saveGlobalMcpServer(payload);
-  const data = await toResponseJson<ApiResponse<GlobalMcpServerResponse>>(response);
+  const data = await toResponseJson<McpApiResponse<GlobalMcpServerResponse>>(response);
 
   if (!response.ok || !data.success) {
     throw new Error(getApiErrorMessage(data, 'Failed to save MCP server to all providers'));
@@ -538,6 +497,13 @@ export function useMcpServers({ selectedProvider, currentProjects }: UseMcpServe
     [cacheKey, refreshServers, selectedProvider],
   );
 
+  // Called after a change made outside this hook (the raw config editor) so every
+  // provider's cached list is dropped and the visible one is re-read from disk.
+  const reloadServers = useCallback(async () => {
+    mcpServersCache.clear();
+    await refreshServers({ force: true });
+  }, [refreshServers]);
+
   useEffect(() => {
     void refreshServers();
   }, [refreshServers]);
@@ -572,5 +538,6 @@ export function useMcpServers({ selectedProvider, currentProjects }: UseMcpServe
     submitGlobalForm,
     deleteServer,
     toggleServerEnabled,
+    reloadServers,
   };
 }
