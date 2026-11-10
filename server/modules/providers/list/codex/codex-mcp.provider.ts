@@ -35,6 +35,26 @@ const writeTomlConfig = async (filePath: string, data: Record<string, unknown>):
 };
 
 export class CodexMcpProvider extends McpProvider {
+  protected readonly managedConfigKeys = [
+    'command', 'args', 'env', 'env_vars', 'cwd',
+    'url', 'bearer_token_env_var', 'http_headers', 'env_http_headers',
+  ] as const;
+
+  // Codex skips a server whose table has `enabled = false` but keeps its definition.
+  protected readonly supportsEnableToggle = true;
+
+  protected readEnabled(rawConfig: unknown): boolean {
+    return readObjectRecord(rawConfig)?.enabled !== false;
+  }
+
+  protected writeEnabled(config: Record<string, unknown>, enabled: boolean): void {
+    if (enabled) {
+      delete config.enabled;
+    } else {
+      config.enabled = false;
+    }
+  }
+
   constructor() {
     super('codex', ['user', 'project'], ['stdio', 'http']);
   }
@@ -114,6 +134,7 @@ export class CodexMcpProvider extends McpProvider {
         env: readStringRecord(config.env),
         cwd: readOptionalString(config.cwd),
         envVars: readStringArray(config.env_vars),
+        enabled: config.enabled !== false,
       };
     }
 
@@ -127,6 +148,7 @@ export class CodexMcpProvider extends McpProvider {
         headers: readStringRecord(config.http_headers),
         bearerTokenEnvVar: readOptionalString(config.bearer_token_env_var),
         envHttpHeaders: readStringRecord(config.env_http_headers),
+        enabled: config.enabled !== false,
       };
     }
 

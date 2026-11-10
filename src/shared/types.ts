@@ -1271,6 +1271,8 @@ export type ProviderMcpServer = {
   envVars?: string[];
   bearerTokenEnvVar?: string;
   envHttpHeaders?: KeyValueMap;
+  /** Whether the provider loads this server; absent when the provider has no per-server switch (see MCP_SUPPORTS_ENABLE_TOGGLE). */
+  enabled?: boolean;
   workspacePath?: string;
   projectName?: string;
   projectDisplayName?: string;

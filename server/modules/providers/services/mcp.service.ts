@@ -1,5 +1,11 @@
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
-import type { LLMProvider, McpScope, ProviderMcpServer, UpsertProviderMcpServerInput } from '@/shared/types.js';
+import type {
+  LLMProvider,
+  McpScope,
+  ProviderMcpServer,
+  SetProviderMcpServerEnabledInput,
+  UpsertProviderMcpServerInput,
+} from '@/shared/types.js';
 import { AppError } from '@/shared/utils.js';
 
 
@@ -36,6 +42,17 @@ export const providerMcpService = {
   ): Promise<ProviderMcpServer> {
     const provider = providerRegistry.resolveProvider(providerName);
     return provider.mcp.upsertServer(input);
+  },
+
+  /**
+   * Switches one provider MCP server on or off in that provider's own config.
+   */
+  async setProviderMcpServerEnabled(
+    providerName: string,
+    input: SetProviderMcpServerEnabledInput,
+  ): Promise<ProviderMcpServer> {
+    const provider = providerRegistry.resolveProvider(providerName);
+    return provider.mcp.setServerEnabled(input);
   },
 
   /**

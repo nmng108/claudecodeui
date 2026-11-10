@@ -124,6 +124,20 @@ const resolveOpenCodeConfigPath = async (scope: McpScope, workspacePath: string)
 };
 
 export class OpenCodeMcpProvider extends McpProvider {
+  // `enabled` is deliberately not managed: a new server gets `enabled: true` from
+  // buildServerConfig, and an edit keeps whatever the user last chose.
+  protected readonly managedConfigKeys = ['type', 'command', 'args', 'env', 'environment', 'url', 'headers'] as const;
+
+  protected readonly supportsEnableToggle = true;
+
+  protected readEnabled(rawConfig: unknown): boolean {
+    return readObjectRecord(rawConfig)?.enabled !== false;
+  }
+
+  protected writeEnabled(config: Record<string, unknown>, enabled: boolean): void {
+    config.enabled = enabled;
+  }
+
   constructor() {
     super('opencode', ['user', 'project'], ['stdio', 'http']);
   }
@@ -204,6 +218,7 @@ export class OpenCodeMcpProvider extends McpProvider {
         command,
         args: commandParts.slice(1),
         env: readStringRecord(config.environment) ?? readStringRecord(config.env),
+        enabled: config.enabled !== false,
       };
     }
 
@@ -220,6 +235,7 @@ export class OpenCodeMcpProvider extends McpProvider {
         transport: 'http',
         url,
         headers: readStringRecord(config.headers),
+        enabled: config.enabled !== false,
       };
     }
 

@@ -144,6 +144,15 @@ export const MCP_SUPPORTED_TRANSPORTS: Record<McpProvider, McpTransport[]> = {
 /** Transports offered when configuring a global (provider-agnostic) MCP server. */
 export const MCP_GLOBAL_SUPPORTED_TRANSPORTS: McpTransport[] = ['stdio', 'http'];
 
+/** Whether a provider's own config can switch a single MCP server on or off; the server list shows the toggle only when it can. */
+export const MCP_SUPPORTS_ENABLE_TOGGLE: Record<McpProvider, boolean> = {
+  claude: false,
+  cursor: false,
+  codex: true,
+  opencode: true,
+  kiro: true,
+};
+
 /** Whether a provider honours an MCP server's working-directory setting; the form hides the field when it does not. */
 export const MCP_SUPPORTS_WORKING_DIRECTORY: Record<McpProvider, boolean> = {
   claude: false,

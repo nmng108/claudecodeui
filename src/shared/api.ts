@@ -533,6 +533,12 @@ export const api = {
       del(
         `/api/providers/${provider}/mcp/servers/${encodeURIComponent(serverName)}${query({ scope, workspacePath })}`,
       ),
+    setMcpServerEnabled: (
+      provider: string,
+      serverName: string,
+      payload: { enabled: boolean; scope: string; workspacePath?: string },
+    ) =>
+      patch(`/api/providers/${provider}/mcp/servers/${encodeURIComponent(serverName)}/enabled`, payload),
     saveGlobalMcpServer: (payload: unknown) => post('/api/providers/mcp/servers/global', payload),
 
     skills: (provider: string, { workspacePath }: { workspacePath?: string } = {}) =>

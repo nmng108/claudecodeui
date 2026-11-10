@@ -853,6 +853,12 @@ export type ProviderMcpServer = {
   envVars?: string[];
   bearerTokenEnvVar?: string;
   envHttpHeaders?: Record<string, string>;
+  /**
+   * Whether the provider will load this server. Only set for providers whose
+   * config can express it natively (Kiro, Codex, OpenCode); `undefined` means
+   * the provider has no per-server on/off switch, not that the server is off.
+   */
+  enabled?: boolean;
 };
 
 /**
@@ -875,6 +881,23 @@ export type UpsertProviderMcpServerInput = {
   envVars?: string[];
   bearerTokenEnvVar?: string;
   envHttpHeaders?: Record<string, string>;
+  /**
+   * Optional on/off state to write with the server. Omit it on edits so the
+   * server's current state, and any other provider-only fields, are kept.
+   */
+  enabled?: boolean;
+};
+
+/**
+ * Input for switching one MCP server on or off in a provider's own config
+ * without touching the rest of its definition. Used by the provider MCP
+ * service and routes; rejected for providers without a native switch.
+ */
+export type SetProviderMcpServerEnabledInput = {
+  name: string;
+  scope?: McpScope;
+  workspacePath?: string;
+  enabled: boolean;
 };
 
 // ---------------------------

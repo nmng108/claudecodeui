@@ -51,6 +51,19 @@ const readKiroMcpConfig = async (filePath: string): Promise<Record<string, unkno
 };
 
 export class KiroMcpProvider extends McpProvider {
+  protected readonly managedConfigKeys = ['command', 'args', 'env', 'url', 'headers'] as const;
+
+  // Kiro stores the switch as `disabled: true`; `autoApprove` and friends are never touched.
+  protected readonly supportsEnableToggle = true;
+
+  protected readEnabled(rawConfig: unknown): boolean {
+    return readObjectRecord(rawConfig)?.disabled !== true;
+  }
+
+  protected writeEnabled(config: Record<string, unknown>, enabled: boolean): void {
+    config.disabled = !enabled;
+  }
+
   constructor() {
     super('kiro', ['user', 'project'], ['stdio', 'http']);
   }
@@ -125,6 +138,7 @@ export class KiroMcpProvider extends McpProvider {
         command,
         args: readStringArray(config.args) ?? [],
         env: readStringRecord(config.env),
+        enabled: config.disabled !== true,
       };
     }
 
@@ -137,6 +151,7 @@ export class KiroMcpProvider extends McpProvider {
         transport: 'http',
         url,
         headers: readStringRecord(config.headers),
+        enabled: config.disabled !== true,
       };
     }
 

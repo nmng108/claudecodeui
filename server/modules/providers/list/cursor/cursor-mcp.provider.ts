@@ -14,6 +14,8 @@ import {
 } from '@/shared/utils.js';
 
 export class CursorMcpProvider extends McpProvider {
+  protected readonly managedConfigKeys = ['command', 'args', 'env', 'cwd', 'url', 'headers'] as const;
+
   constructor() {
     super('cursor', ['user', 'project'], ['stdio', 'http']);
   }

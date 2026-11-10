@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import type { McpProject, McpProvider, McpScope, ProviderMcpServer } from '@/shared/types';
 import { IS_PLATFORM } from '@/shared/utils';
 import { ActionMenu, Badge, Button } from '@/shared/ui';
-import { MCP_GLOBAL_SUPPORTED_TRANSPORTS, MCP_PROVIDER_NAMES } from '@/shared/constants';
+import { MCP_GLOBAL_SUPPORTED_TRANSPORTS, MCP_PROVIDER_NAMES, MCP_SUPPORTS_ENABLE_TOGGLE } from '@/shared/constants';
 import { useMcpServers } from '@/modules/mcp/hooks/useMcpServers';
 import { maskSecret } from '@/modules/mcp/utils/mcpFormatting';
 import McpServerFormModal from '@/modules/mcp/McpServerFormModal';
@@ -60,6 +60,23 @@ const getServerKey = (server: ProviderMcpServer): string => (
 // CloudCLI feature toggle (e.g. the Browser tab), not added by the user. They are
 // shown read-only so users don't edit/delete them out of sync with the feature.
 const isManagedServer = (server: ProviderMcpServer): boolean => server.name.startsWith('cloudcli-');
+
+// Minimal on/off switch for a server row; used only by this list.
+function EnabledSwitch({ checked, label, onChange }: { checked: boolean; label: string; onChange: (next: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      title={label}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors ${checked ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+    >
+      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-4' : 'translate-x-0.5'}`} />
+    </button>
+  );
+}
 
 function ConfigLine({ label, children }: { label: string; children: string }) {
   if (!children) {
@@ -122,6 +139,7 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
     submitForm,
     submitGlobalForm,
     deleteServer,
+    toggleServerEnabled,
   } = useMcpServers({ selectedProvider, currentProjects });
 
   const providerName = MCP_PROVIDER_NAMES[selectedProvider];
@@ -200,7 +218,12 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
                 <div className="min-w-0 flex-1">
                   <div className="mb-2 flex flex-wrap items-center gap-2">
                     {!managed && getTransportIcon(server.transport)}
-                    <span className="font-medium text-foreground">{server.name}</span>
+                    <span className={`font-medium ${server.enabled === false ? 'text-muted-foreground line-through' : 'text-foreground'}`}>{server.name}</span>
+                    {server.enabled === false && (
+                      <Badge variant="outline" className="text-xs text-muted-foreground">
+                        {t('mcpServers.disabledBadge', { defaultValue: 'Disabled' })}
+                      </Badge>
+                    )}
                     {!managed && (
                       <>
                         <Badge variant="outline" className="text-xs">
@@ -253,6 +276,15 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
 
                 {!managed && (
                   <div className="ml-4 flex items-center gap-2">
+                    {MCP_SUPPORTS_ENABLE_TOGGLE[selectedProvider] && server.enabled !== undefined && (
+                      <EnabledSwitch
+                        checked={server.enabled}
+                        label={server.enabled
+                          ? t('mcpServers.actions.disable', { defaultValue: 'Disable server' })
+                          : t('mcpServers.actions.enable', { defaultValue: 'Enable server' })}
+                        onChange={(next) => void toggleServerEnabled(server, next)}
+                      />
+                    )}
                     <Button
                       onClick={() => openForm(server)}
                       variant="ghost"

@@ -14,6 +14,8 @@ import {
 } from '@/shared/utils.js';
 
 export class ClaudeMcpProvider extends McpProvider {
+  protected readonly managedConfigKeys = ['type', 'command', 'args', 'env', 'url', 'headers'] as const;
+
   constructor() {
     super('claude', ['user', 'local', 'project'], ['stdio', 'http', 'sse']);
   }

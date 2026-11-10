@@ -442,3 +442,119 @@ test('providerMcpService global adder writes to all providers and rejects unsupp
   }
 });
 
+
+/**
+ * This test covers the merge-preserving upsert and the enable/disable switch for Kiro:
+ * editing a server keeps `disabled`, `autoApprove` and unknown keys, and switching the
+ * transport drops only the keys of the old transport.
+ */
+test('providerMcpService keeps provider-only fields on edit and toggles kiro servers', { concurrency: false }, async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-mcp-kiro-toggle-'));
+  const configPath = path.join(tempRoot, '.kiro', 'settings', 'mcp.json');
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.writeFile(
+    configPath,
+    JSON.stringify({
+      mcpServers: {
+        approved: { command: 'uvx', args: ['a'], env: {}, disabled: true, autoApprove: ['tool_a'], extra: 1 },
+      },
+    }),
+    'utf8',
+  );
+
+  const restoreHomeDir = patchHomeDir(tempRoot);
+  try {
+    const edited = await providerMcpService.upsertProviderMcpServer('kiro', {
+      name: 'approved',
+      scope: 'user',
+      transport: 'stdio',
+      command: 'uvx',
+      args: ['b'],
+    });
+    assert.equal(edited.enabled, false);
+
+    let servers = (await readJson(configPath)).mcpServers as Record<string, Record<string, unknown>>;
+    assert.deepEqual(servers.approved.args, ['b']);
+    assert.equal(servers.approved.disabled, true);
+    assert.deepEqual(servers.approved.autoApprove, ['tool_a']);
+    assert.equal(servers.approved.extra, 1);
+
+    const enabled = await providerMcpService.setProviderMcpServerEnabled('kiro', {
+      name: 'approved',
+      scope: 'user',
+      enabled: true,
+    });
+    assert.equal(enabled.enabled, true);
+    servers = (await readJson(configPath)).mcpServers as Record<string, Record<string, unknown>>;
+    assert.equal(servers.approved.disabled, false);
+    assert.deepEqual(servers.approved.autoApprove, ['tool_a']);
+
+    await providerMcpService.upsertProviderMcpServer('kiro', {
+      name: 'approved',
+      scope: 'user',
+      transport: 'http',
+      url: 'https://example.com/mcp',
+    });
+    servers = (await readJson(configPath)).mcpServers as Record<string, Record<string, unknown>>;
+    assert.equal(servers.approved.command, undefined);
+    assert.equal(servers.approved.args, undefined);
+    assert.equal(servers.approved.url, 'https://example.com/mcp');
+    assert.deepEqual(servers.approved.autoApprove, ['tool_a']);
+
+    await assert.rejects(
+      providerMcpService.setProviderMcpServerEnabled('kiro', { name: 'missing', scope: 'user', enabled: false }),
+      (error: unknown) => error instanceof AppError && error.code === 'MCP_SERVER_NOT_FOUND' && error.statusCode === 404,
+    );
+  } finally {
+    restoreHomeDir();
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+/**
+ * This test covers the native switches of Codex (`enabled` in TOML) and OpenCode
+ * (`enabled` in JSON), and the rejection for providers without one.
+ */
+test('providerMcpService toggles codex and opencode servers and rejects claude and cursor', { concurrency: false }, async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-mcp-toggle-'));
+  const restoreHomeDir = patchHomeDir(tempRoot);
+  try {
+    await providerMcpService.upsertProviderMcpServer('codex', {
+      name: 'codex-srv', scope: 'user', transport: 'stdio', command: 'node',
+    });
+    const codexOff = await providerMcpService.setProviderMcpServerEnabled('codex', {
+      name: 'codex-srv', scope: 'user', enabled: false,
+    });
+    assert.equal(codexOff.enabled, false);
+    const codexToml = TOML.parse(await fs.readFile(path.join(tempRoot, '.codex', 'config.toml'), 'utf8')) as any;
+    assert.equal(codexToml.mcp_servers['codex-srv'].enabled, false);
+    await providerMcpService.upsertProviderMcpServer('codex', {
+      name: 'codex-srv', scope: 'user', transport: 'stdio', command: 'node', args: ['x'],
+    });
+    const codexAfterEdit = await providerMcpService.listProviderMcpServersForScope('codex', 'user');
+    assert.equal(codexAfterEdit.find((server) => server.name === 'codex-srv')?.enabled, false);
+
+    await providerMcpService.upsertProviderMcpServer('opencode', {
+      name: 'oc-srv', scope: 'user', transport: 'http', url: 'https://example.com/mcp',
+    });
+    await providerMcpService.setProviderMcpServerEnabled('opencode', { name: 'oc-srv', scope: 'user', enabled: false });
+    await providerMcpService.upsertProviderMcpServer('opencode', {
+      name: 'oc-srv', scope: 'user', transport: 'http', url: 'https://example.com/other',
+    });
+    const ocConfig = await readJson(path.join(tempRoot, '.config', 'opencode', 'opencode.json'));
+    assert.equal((ocConfig.mcp as Record<string, Record<string, unknown>>)['oc-srv'].enabled, false);
+
+    for (const provider of ['claude', 'cursor']) {
+      await providerMcpService.upsertProviderMcpServer(provider, {
+        name: 'no-toggle', scope: 'user', transport: 'stdio', command: 'node',
+      });
+      await assert.rejects(
+        providerMcpService.setProviderMcpServerEnabled(provider, { name: 'no-toggle', scope: 'user', enabled: false }),
+        (error: unknown) => error instanceof AppError && error.code === 'MCP_TOGGLE_NOT_SUPPORTED',
+      );
+    }
+  } finally {
+    restoreHomeDir();
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});

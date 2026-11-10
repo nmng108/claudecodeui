@@ -15,6 +15,7 @@ import type {
   ProviderMcpServer,
   ProviderSkillCreateInput,
   ProviderSkillRemoveInput,
+  SetProviderMcpServerEnabledInput,
   ProviderRuntimeContext,
   ProviderRuntimePermissionGateway,
   ProviderRuntimeWriter,
@@ -194,6 +195,13 @@ export interface IProviderMcp {
   removeServer(
     input: { name: string; scope?: McpScope; workspacePath?: string },
   ): Promise<{ removed: boolean; provider: LLMProvider; name: string; scope: McpScope }>;
+  /**
+   * Switches one existing server on or off in the provider's own config, keeping
+   * the rest of its definition. Throws `MCP_TOGGLE_NOT_SUPPORTED` (400) for
+   * providers without a native per-server switch and `MCP_SERVER_NOT_FOUND` (404)
+   * when the server is not in that scope.
+   */
+  setServerEnabled(input: SetProviderMcpServerEnabledInput): Promise<ProviderMcpServer>;
 }
 
 // ---------------------------

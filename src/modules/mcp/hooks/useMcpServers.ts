@@ -125,6 +125,7 @@ const normalizeServer = (
     envVars: server.envVars ?? [],
     bearerTokenEnvVar: server.bearerTokenEnvVar,
     envHttpHeaders: server.envHttpHeaders ?? {},
+    enabled: server.enabled,
     workspacePath: project?.path || server.workspacePath,
     // Keep the `projectName` key in the MCP wire payload for backwards
     // compatibility. ProjectTarget.name is populated from the DB `projectId`
@@ -183,6 +184,23 @@ const deleteProviderServer = async (
 
   if (!response.ok || !data.success) {
     throw new Error(getApiErrorMessage(data, 'Failed to delete MCP server'));
+  }
+};
+
+const setProviderServerEnabled = async (
+  provider: McpProvider,
+  server: ProviderMcpServer,
+  enabled: boolean,
+): Promise<void> => {
+  const response = await api.providers.setMcpServerEnabled(provider, server.name, {
+    enabled,
+    scope: server.scope,
+    workspacePath: server.workspacePath,
+  });
+  const data = await toResponseJson<ApiResponse<{ server: ProviderMcpServer }>>(response);
+
+  if (!response.ok || !data.success) {
+    throw new Error(getApiErrorMessage(data, 'Failed to update MCP server'));
   }
 };
 
@@ -504,6 +522,22 @@ export function useMcpServers({ selectedProvider, currentProjects }: UseMcpServe
     [cacheKey, refreshServers, selectedProvider, t],
   );
 
+  const toggleServerEnabled = useCallback(
+    async (server: ProviderMcpServer, enabled: boolean) => {
+      setDeleteError(null);
+      try {
+        await setProviderServerEnabled(selectedProvider, server, enabled);
+        mcpServersCache.delete(cacheKey);
+        await refreshServers({ force: true });
+        setSaveStatus('success');
+      } catch (error) {
+        setDeleteError(getErrorMessage(error));
+        setSaveStatus('error');
+      }
+    },
+    [cacheKey, refreshServers, selectedProvider],
+  );
+
   useEffect(() => {
     void refreshServers();
   }, [refreshServers]);
@@ -537,5 +571,6 @@ export function useMcpServers({ selectedProvider, currentProjects }: UseMcpServe
     submitForm,
     submitGlobalForm,
     deleteServer,
+    toggleServerEnabled,
   };
 }

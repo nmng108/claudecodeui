@@ -194,6 +194,7 @@ const parseMcpUpsertPayload = (payload: unknown): UpsertProviderMcpServerInput =
     transport,
     scope,
     workspacePath,
+    enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
     command: readOptionalQueryString(body.command),
     args: Array.isArray(body.args) ? body.args.filter((entry): entry is string => typeof entry === 'string') : undefined,
     env: typeof body.env === 'object' && body.env !== null
@@ -907,6 +908,28 @@ router.post(
     const payload = parseMcpUpsertPayload(req.body);
     const server = await providerMcpService.upsertProviderMcpServer(provider, payload);
     res.status(201).json(createApiSuccessResponse({ server }));
+  }),
+);
+
+router.patch(
+  '/:provider/mcp/servers/:name/enabled',
+  asyncHandler(async (req: Request, res: Response) => {
+    const provider = parseProvider(req.params.provider);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (typeof body.enabled !== 'boolean') {
+      throw new AppError('enabled must be a boolean.', {
+        code: 'MCP_ENABLED_REQUIRED',
+        statusCode: 400,
+      });
+    }
+
+    const server = await providerMcpService.setProviderMcpServerEnabled(provider, {
+      name: readPathParam(req.params.name, 'name'),
+      scope: parseMcpScope(body.scope),
+      workspacePath: readOptionalQueryString(body.workspacePath),
+      enabled: body.enabled,
+    });
+    res.json(createApiSuccessResponse({ server }));
   }),
 );
 
