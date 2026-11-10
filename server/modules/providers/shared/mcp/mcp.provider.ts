@@ -190,6 +190,10 @@ export abstract class McpProvider implements IProviderMcp {
     };
   }
 
+  canToggleServers(): boolean {
+    return this.supportsEnableToggle;
+  }
+
   async setServerEnabled(input: SetProviderMcpServerEnabledInput): Promise<ProviderMcpServer> {
     const scope = input.scope ?? 'project';
     this.assertScope(scope);

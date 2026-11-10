@@ -205,6 +205,8 @@ export interface IProviderMcp {
    * when the server is not in that scope.
    */
   setServerEnabled(input: SetProviderMcpServerEnabledInput): Promise<ProviderMcpServer>;
+  /** True when the provider's config can switch one server off without removing it. */
+  canToggleServers(): boolean;
   /** Returns the provider's MCP config text for a scope (empty when the file does not exist). */
   readRawConfig(input: { scope?: McpScope; workspacePath?: string }): Promise<ProviderMcpRawConfig>;
   /**

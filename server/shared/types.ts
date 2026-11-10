@@ -965,6 +965,117 @@ export type ProviderMcpRawConfigWriteResult = ProviderMcpRawConfig & {
 };
 
 // ---------------------------
+//----------------- CENTRAL MCP TYPES ------------
+/**
+ * Scope of a central MCP server. Provider-local scope is excluded because it
+ * has no equivalent in most providers.
+ */
+export type CentralMcpScope = Exclude<McpScope, 'local'>;
+
+/**
+ * An MCP server defined once in the app database and applied by name to the
+ * config of each linked provider. `workspacePath` is set only for `project`
+ * scope. Only stdio and http are supported because every provider can express
+ * them.
+ */
+export type CentralMcpServer = {
+  id: number;
+  name: string;
+  scope: CentralMcpScope;
+  workspacePath?: string;
+  transport: Extract<McpTransport, 'stdio' | 'http'>;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/**
+ * How one provider's own config compares with the central definition:
+ * `in_sync` matches; `drifted` has the entry but with other values (see
+ * `differences`); `missing` has no entry although one is expected; `paused` has
+ * no entry on purpose because the server is switched off for a provider without
+ * a native on/off field.
+ */
+export type CentralMcpTargetState = 'in_sync' | 'drifted' | 'missing' | 'paused';
+
+/**
+ * One provider linked to a central server, with its current comparison result.
+ * `differences` names the fields that differ (for example `url`, `enabled`) and
+ * is empty unless the state is `drifted`. `error` is set when the provider's
+ * config could not be read, in which case the state is not reliable.
+ */
+export type CentralMcpTargetStatus = {
+  provider: LLMProvider;
+  enabled: boolean;
+  state: CentralMcpTargetState;
+  differences: string[];
+  error?: string;
+};
+
+/** A central server together with the status of every provider it is linked to. */
+export type CentralMcpServerWithStatus = CentralMcpServer & {
+  targets: CentralMcpTargetStatus[];
+};
+
+/**
+ * Fields that define a central server's connection. Used when creating and
+ * updating; name, scope and workspace cannot change after creation.
+ */
+export type CentralMcpServerFields = {
+  transport: CentralMcpServer['transport'];
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+};
+
+/**
+ * Input for creating a central server and linking it to providers. `providers`
+ * defaults to every provider. An entry that already exists under the same name
+ * in a provider is reported as a conflict and left alone unless `adoptExisting`
+ * is true, which overwrites its connection fields and takes ownership.
+ */
+export type CreateCentralMcpServerInput = CentralMcpServerFields & {
+  name: string;
+  scope: CentralMcpScope;
+  workspacePath?: string;
+  enabled?: boolean;
+  providers?: LLMProvider[];
+  adoptExisting?: boolean;
+};
+
+/**
+ * Input for editing a central server. Changed fields are pushed to every linked
+ * provider; `providers`, when present, replaces the linked set (new ones are
+ * added, dropped ones have their entry removed).
+ */
+export type UpdateCentralMcpServerInput = Partial<CentralMcpServerFields> & {
+  providers?: LLMProvider[];
+  adoptExisting?: boolean;
+};
+
+/**
+ * Outcome of applying a central server to one provider. `conflict` means an
+ * entry the app does not own already uses the name.
+ */
+export type CentralMcpApplyResult = {
+  provider: LLMProvider;
+  outcome: 'applied' | 'removed' | 'conflict' | 'failed';
+  error?: string;
+};
+
+/** Result of a central-server operation: the server as it now stands and what happened per provider. */
+export type CentralMcpOperationResult = {
+  server: CentralMcpServerWithStatus;
+  results: CentralMcpApplyResult[];
+};
+
+// ---------------------------
 //----------------- PROVIDER AUTH TYPES ------------
 /**
  * Records that an API-key style credential is taking precedence over a

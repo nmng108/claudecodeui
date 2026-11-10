@@ -5,6 +5,7 @@ import { claudeSettingsPermissionsService } from '@/modules/providers/services/c
 import { providerCapabilitiesService } from '@/modules/providers/services/provider-capabilities.service.js';
 import { providerCliService } from '@/modules/providers/services/provider-cli.service.js';
 import { providerMcpService } from '@/modules/providers/services/mcp.service.js';
+import { providerMcpCentralService } from '@/modules/providers/services/mcp-central.service.js';
 import { providerModelsService } from '@/modules/providers/services/provider-models.service.js';
 import { providerTokenUsageService } from '@/modules/providers/services/provider-token-usage.service.js';
 import { providerSkillsService } from '@/modules/providers/services/skills.service.js';
@@ -1007,6 +1008,177 @@ router.post(
       scope: payload.scope === 'user' ? 'user' : 'project',
     });
     res.status(201).json(createApiSuccessResponse({ results }));
+  }),
+);
+
+// ----------------- Central MCP routes -----------------
+const parseCentralId = (value: unknown): number => {
+  const id = Number(readPathParam(value, 'id'));
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new AppError('id must be a positive integer.', { code: 'INVALID_MCP_CENTRAL_ID', statusCode: 400 });
+  }
+
+  return id;
+};
+
+const parseProviderList = (value: unknown): LLMProvider[] | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new AppError('providers must be an array.', { code: 'INVALID_REQUEST_BODY', statusCode: 400 });
+  }
+
+  return value.map((entry) => parseProvider(entry));
+};
+
+const parseCentralFields = (body: Record<string, unknown>) => {
+  const parsed = parseMcpUpsertPayload({ ...body, name: body.name ?? 'unused', transport: body.transport ?? 'stdio' });
+  return {
+    command: parsed.command,
+    args: parsed.args,
+    env: parsed.env,
+    url: parsed.url,
+    headers: parsed.headers,
+  };
+};
+
+router.get(
+  '/mcp/central/servers',
+  asyncHandler(async (_req: Request, res: Response) => {
+    const servers = await providerMcpCentralService.listCentralServers();
+    res.json(createApiSuccessResponse({ servers }));
+  }),
+);
+
+router.post(
+  '/mcp/central/servers',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const scope = parseMcpScope(body.scope);
+    if (scope !== 'user' && scope !== 'project') {
+      throw new AppError('scope must be "user" or "project".', { code: 'INVALID_GLOBAL_MCP_SCOPE', statusCode: 400 });
+    }
+
+    const transport = parseMcpTransport(body.transport);
+    if (transport !== 'stdio' && transport !== 'http') {
+      throw new AppError('Shared MCP servers support only "stdio" and "http".', {
+        code: 'INVALID_GLOBAL_MCP_TRANSPORT',
+        statusCode: 400,
+      });
+    }
+
+    const result = await providerMcpCentralService.createCentralServer({
+      name: readOptionalQueryString(body.name) ?? '',
+      scope,
+      workspacePath: readOptionalQueryString(body.workspacePath),
+      transport,
+      ...parseCentralFields(body),
+      enabled: typeof body.enabled === 'boolean' ? body.enabled : undefined,
+      providers: parseProviderList(body.providers),
+      adoptExisting: body.adoptExisting === true,
+    });
+    res.status(201).json(createApiSuccessResponse(result));
+  }),
+);
+
+router.post(
+  '/mcp/central/import',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const scope = parseMcpScope(body.scope);
+    if (scope !== 'user' && scope !== 'project') {
+      throw new AppError('scope must be "user" or "project".', { code: 'INVALID_GLOBAL_MCP_SCOPE', statusCode: 400 });
+    }
+
+    const result = await providerMcpCentralService.importFromProvider({
+      provider: parseProvider(body.provider),
+      name: readOptionalQueryString(body.name) ?? '',
+      scope,
+      workspacePath: readOptionalQueryString(body.workspacePath),
+    });
+    res.status(201).json(createApiSuccessResponse(result));
+  }),
+);
+
+router.patch(
+  '/mcp/central/servers/:id',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const transport = body.transport === undefined ? undefined : parseMcpTransport(body.transport);
+    if (transport === 'sse') {
+      throw new AppError('Shared MCP servers support only "stdio" and "http".', {
+        code: 'INVALID_GLOBAL_MCP_TRANSPORT',
+        statusCode: 400,
+      });
+    }
+
+    const fields = parseCentralFields(body);
+    const result = await providerMcpCentralService.updateCentralServer(parseCentralId(req.params.id), {
+      transport,
+      command: body.command === undefined ? undefined : fields.command,
+      args: body.args === undefined ? undefined : fields.args,
+      env: body.env === undefined ? undefined : fields.env,
+      url: body.url === undefined ? undefined : fields.url,
+      headers: body.headers === undefined ? undefined : fields.headers,
+      providers: parseProviderList(body.providers),
+      adoptExisting: body.adoptExisting === true,
+    });
+    res.json(createApiSuccessResponse(result));
+  }),
+);
+
+router.patch(
+  '/mcp/central/servers/:id/enabled',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (typeof body.enabled !== 'boolean') {
+      throw new AppError('enabled must be a boolean.', { code: 'MCP_ENABLED_REQUIRED', statusCode: 400 });
+    }
+
+    const result = await providerMcpCentralService.setCentralServerEnabled(
+      parseCentralId(req.params.id),
+      body.enabled,
+      parseProviderList(body.providers),
+    );
+    res.json(createApiSuccessResponse(result));
+  }),
+);
+
+router.post(
+  '/mcp/central/servers/:id/resync',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const result = await providerMcpCentralService.resyncCentralServer(
+      parseCentralId(req.params.id),
+      body.provider === undefined ? undefined : parseProvider(body.provider),
+    );
+    res.json(createApiSuccessResponse(result));
+  }),
+);
+
+router.post(
+  '/mcp/central/servers/:id/adopt',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const result = await providerMcpCentralService.adoptCentralFromProvider(
+      parseCentralId(req.params.id),
+      parseProvider(body.provider),
+    );
+    res.json(createApiSuccessResponse(result));
+  }),
+);
+
+router.delete(
+  '/mcp/central/servers/:id',
+  asyncHandler(async (req: Request, res: Response) => {
+    const results = await providerMcpCentralService.deleteCentralServer(
+      parseCentralId(req.params.id),
+      readOptionalQueryString(req.query.removeFromProviders) !== 'false',
+    );
+    const deleted = !results.some((result) => result.outcome === 'failed');
+    res.json(createApiSuccessResponse({ deleted, results }));
   }),
 );
 

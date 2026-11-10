@@ -257,6 +257,51 @@ CREATE TABLE IF NOT EXISTS superseded_provider_sessions (
 );
 `;
 
+/**
+ * MCP servers managed once and applied to several providers by name.
+ *
+ * One row is one server in one scope: `user` (the provider's global config) or
+ * `project` (the config inside `workspace_path`; empty for user scope so the
+ * unique key stays well defined). `args`, `env` and `headers` are JSON text.
+ * Secrets in `env`/`headers` are stored in plaintext, like the provider files
+ * they are copied into.
+ */
+export const MCP_CENTRAL_SERVERS_TABLE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS mcp_central_servers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    scope TEXT NOT NULL CHECK (scope IN ('user', 'project')),
+    workspace_path TEXT NOT NULL DEFAULT '',
+    transport TEXT NOT NULL CHECK (transport IN ('stdio', 'http')),
+    command TEXT,
+    args TEXT,
+    env TEXT,
+    url TEXT,
+    headers TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(name, scope, workspace_path)
+);
+`;
+
+/**
+ * The provider config entries a central MCP server owns.
+ *
+ * A row means the app wrote (and may update or remove) the entry with the
+ * server's name in that provider's config. `enabled` is the intended on/off
+ * state for that provider; providers without a native switch express "off" by
+ * having no entry at all.
+ */
+export const MCP_CENTRAL_TARGETS_TABLE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS mcp_central_targets (
+    server_id INTEGER NOT NULL,
+    provider TEXT NOT NULL CHECK (provider IN ('claude', 'cursor', 'codex', 'opencode', 'kiro')),
+    enabled INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY (server_id, provider),
+    FOREIGN KEY (server_id) REFERENCES mcp_central_servers(id) ON DELETE CASCADE
+);
+`;
+
 export const INIT_SCHEMA_SQL = `
 -- Initialize authentication database
 PRAGMA foreign_keys = ON;
@@ -310,4 +355,8 @@ ${USER_PREFERENCES_TABLE_SCHEMA_SQL}
 ${SESSION_DRAFTS_TABLE_SCHEMA_SQL}
 
 ${SUPERSEDED_PROVIDER_SESSIONS_TABLE_SCHEMA_SQL}
+
+${MCP_CENTRAL_SERVERS_TABLE_SCHEMA_SQL}
+
+${MCP_CENTRAL_TARGETS_TABLE_SCHEMA_SQL}
 `;
