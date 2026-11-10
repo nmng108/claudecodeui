@@ -41,11 +41,23 @@ export const formatKeyValueLines = (value: KeyValueMap): string => (
 
 export const parseKeyValueLines = (value: string): KeyValueMap => {
   const normalized: KeyValueMap = {};
-  value.split('\n').forEach((line) => {
-    const [key, ...valueParts] = line.split('=');
-    if (key?.trim()) {
-      normalized[key.trim()] = valueParts.join('=').trim();
+  value.split(/\r?\n/).forEach((line) => {
+    if (!line.trim() || line.trim().startsWith('#')) {
+      return;
     }
+
+    // A non-blank line without "=" used to be dropped silently, so a typo erased the variable
+    // on save with no sign anything was wrong. Refuse it instead.
+    if (!line.includes('=')) {
+      throw new Error(`Invalid line "${line.trim()}": expected KEY=value`);
+    }
+
+    const [key, ...valueParts] = line.split('=');
+    if (!key.trim()) {
+      throw new Error(`Invalid line "${line.trim()}": the name before "=" is empty`);
+    }
+
+    normalized[key.trim()] = valueParts.join('=').trim();
   });
   return normalized;
 };

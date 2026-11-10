@@ -1,5 +1,5 @@
 import { Edit3, ExternalLink, FileJson, Globe, Link2, Lock, Plus, Server, Terminal, Trash2, Users, Zap } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { CentralMcpServer, McpFormState, McpProject, McpProvider, McpScope, ProviderMcpServer } from '@/shared/types';
@@ -157,6 +157,22 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
   // Problem from the last shared-server action on a row, shown above the list.
   const [sharedError, setSharedError] = useState<string | null>(null);
   const central = useCentralMcpServers();
+
+  // The form hook reloads its fields whenever this object's identity changes, so it must be
+  // stable while the form is open; an inline literal would wipe what the user has typed on
+  // every re-render of this list.
+  const sharedFormServer = useMemo<ProviderMcpServer | null>(() => (editingShared ? {
+    provider: selectedProvider,
+    name: editingShared.name,
+    scope: editingShared.scope,
+    transport: editingShared.transport,
+    command: editingShared.command,
+    args: editingShared.args,
+    env: editingShared.env,
+    url: editingShared.url,
+    headers: editingShared.headers,
+    workspacePath: editingShared.workspacePath,
+  } : null), [editingShared, selectedProvider]);
 
   const findShared = (server: ProviderMcpServer): CentralMcpServer | undefined => central.servers.find((candidate) => (
     candidate.name === server.name
@@ -500,22 +516,11 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
         />
       )}
 
-      {editingShared && (
+      {sharedFormServer && (
         <McpServerFormModal
           provider={selectedProvider}
           mode="global"
-          editingServer={{
-            provider: selectedProvider,
-            name: editingShared.name,
-            scope: editingShared.scope,
-            transport: editingShared.transport,
-            command: editingShared.command,
-            args: editingShared.args,
-            env: editingShared.env,
-            url: editingShared.url,
-            headers: editingShared.headers,
-            workspacePath: editingShared.workspacePath,
-          }}
+          editingServer={sharedFormServer}
           currentProjects={currentProjects}
           title={t('mcpShared.editTitle', { defaultValue: 'Edit shared server' })}
           description={t('mcpShared.editDescription', { defaultValue: 'Changes are written to every provider this server is linked to.' })}

@@ -55,14 +55,16 @@ if (readIfExists(STAMP) !== expectedHash) {
 console.log(`[dev] UI:  http://localhost:${process.env.VITE_PORT || 5173}`);
 console.log(`[dev] API: http://localhost:${process.env.SERVER_PORT || 3001}`);
 
-// `server:dev-watch` restarts the API server when server files change; `client` is Vite with HMR.
+// `server:dev` runs the API server without a file watcher, so agents started from the UI (including
+// ones editing this repository) are not killed by a restart; restart the container to apply server
+// changes. `client` is Vite with HMR and never restarts the server.
 const child = spawn(
   'npx',
   [
     'concurrently',
     '--kill-others',
     '--names', 'server,client',
-    'npm run server:dev-watch',
+    'npm run server:dev',
     'npm run client',
   ],
   { stdio: 'inherit' },
