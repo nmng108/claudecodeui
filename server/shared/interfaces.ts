@@ -181,6 +181,13 @@ export interface IProviderSkills {
   removeSkill(
     input: ProviderSkillRemoveInput,
   ): Promise<{ removed: boolean; provider: LLMProvider; directoryName: string }>;
+
+  /**
+   * Folder where this provider keeps user skills added through the app, or null
+   * when the provider has no managed skill folder. The central skills service
+   * links central skills into it.
+   */
+  getManagedSkillsRoot(): Promise<string | null>;
 }
 
 // ---------------------------

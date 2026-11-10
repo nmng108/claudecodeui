@@ -279,6 +279,10 @@ export abstract class SkillsProvider implements IProviderSkills {
     return { removed, provider: this.provider, directoryName };
   }
 
+  async getManagedSkillsRoot(): Promise<string | null> {
+    return (await this.getGlobalSkillSource())?.rootDir ?? null;
+  }
+
   protected abstract getSkillSources(workspacePath: string): Promise<ProviderSkillSource[]>;
 
   protected async getGlobalSkillSource(): Promise<ProviderSkillSource | null> {

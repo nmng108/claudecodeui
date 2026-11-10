@@ -1,5 +1,6 @@
 export { sessionSynchronizerService } from './services/session-synchronizer.service.js';
 export { providerSkillsService } from './services/skills.service.js';
+export { providerSkillsCentralService } from './services/skills-central.service.js';
 export { providerMcpService } from './services/mcp.service.js';
 export { providerMcpCentralService } from './services/mcp-central.service.js';
 export { providerRuntimeService } from './services/provider-runtime.service.js';

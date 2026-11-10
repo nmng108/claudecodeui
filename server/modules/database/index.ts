@@ -8,6 +8,8 @@ export { notificationChannelEndpointsDb } from '@/modules/database/repositories/
 export { notificationPreferencesDb } from '@/modules/database/repositories/notification-preferences.js';
 // mcpCentralDb: used by Providers to store central MCP servers and the provider entries they own.
 export { mcpCentralDb } from '@/modules/database/repositories/mcp-central.db.js';
+// skillCentralLinksDb: used by Providers to record which provider skill entries were created from central skills.
+export { skillCentralLinksDb } from '@/modules/database/repositories/skill-central-links.db.js';
 // providerModelsDb: used by Providers to persist user-managed custom model rows.
 export { providerModelsDb } from '@/modules/database/repositories/provider-models.js';
 // projectsDb: used by Projects, Worktrees, Git, WebSocket, and notification modules to persist and resolve project records.

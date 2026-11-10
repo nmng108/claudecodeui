@@ -6,6 +6,7 @@ import { providerCapabilitiesService } from '@/modules/providers/services/provid
 import { providerCliService } from '@/modules/providers/services/provider-cli.service.js';
 import { providerMcpService } from '@/modules/providers/services/mcp.service.js';
 import { providerMcpCentralService } from '@/modules/providers/services/mcp-central.service.js';
+import { providerSkillsCentralService } from '@/modules/providers/services/skills-central.service.js';
 import { providerModelsService } from '@/modules/providers/services/provider-models.service.js';
 import { providerTokenUsageService } from '@/modules/providers/services/provider-token-usage.service.js';
 import { providerSkillsService } from '@/modules/providers/services/skills.service.js';
@@ -848,6 +849,98 @@ router.post(
     res.json(createApiSuccessResponse(
       stored ?? { provider, sessionId, effort, source: 'session' as const },
     ));
+  }),
+);
+
+// ----------------- Central skills routes -----------------
+const parseSkillProviders = (value: unknown): LLMProvider[] | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throw new AppError('providers must be an array.', { code: 'INVALID_REQUEST_BODY', statusCode: 400 });
+  }
+
+  return value.map((entry) => parseProvider(entry));
+};
+
+router.get(
+  '/skills/central',
+  asyncHandler(async (_req: Request, res: Response) => {
+    const skills = await providerSkillsCentralService.listCentralSkills();
+    res.json(createApiSuccessResponse({ skills }));
+  }),
+);
+
+router.post(
+  '/skills/central',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const result = await providerSkillsCentralService.addCentralSkills(parseProviderSkillCreatePayload(body), {
+      providers: parseSkillProviders(body.providers),
+      forceCopy: body.mode === 'copy',
+    });
+    res.status(201).json(createApiSuccessResponse(result));
+  }),
+);
+
+router.post(
+  '/skills/central/adopt',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const result = await providerSkillsCentralService.adoptProviderSkill(
+      parseProvider(body.provider),
+      readPathParam(body.directoryName, 'directoryName'),
+    );
+    res.status(201).json(createApiSuccessResponse({ results: [result] }));
+  }),
+);
+
+router.post(
+  '/skills/central/:directoryName/link',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const results = await providerSkillsCentralService.linkCentralSkill(
+      readPathParam(req.params.directoryName, 'directoryName'),
+      parseSkillProviders(body.providers),
+      body.mode === 'copy',
+    );
+    res.json(createApiSuccessResponse({ results }));
+  }),
+);
+
+router.post(
+  '/skills/central/:directoryName/unlink',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const results = await providerSkillsCentralService.unlinkCentralSkill(
+      readPathParam(req.params.directoryName, 'directoryName'),
+      parseSkillProviders(body.providers),
+    );
+    res.json(createApiSuccessResponse({ results }));
+  }),
+);
+
+router.post(
+  '/skills/central/:directoryName/resync',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const results = await providerSkillsCentralService.resyncCentralSkill(
+      readPathParam(req.params.directoryName, 'directoryName'),
+      parseSkillProviders(body.providers),
+    );
+    res.json(createApiSuccessResponse({ results }));
+  }),
+);
+
+router.delete(
+  '/skills/central/:directoryName',
+  asyncHandler(async (req: Request, res: Response) => {
+    const result = await providerSkillsCentralService.removeCentralSkill(
+      readPathParam(req.params.directoryName, 'directoryName'),
+    );
+    res.json(createApiSuccessResponse(result));
   }),
 );
 

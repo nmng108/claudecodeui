@@ -805,6 +805,60 @@ export type ProviderSkillSource = {
 };
 
 // ---------------------------
+//----------------- CENTRAL SKILL TYPES ------------
+/**
+ * How a provider's skill folder is tied to the central one: `symlink` and
+ * `junction` (Windows directory link) point at the central folder, so an edit
+ * shows up everywhere; `copy` is an independent snapshot, used when links
+ * cannot be created.
+ */
+export type CentralSkillLinkMode = 'symlink' | 'junction' | 'copy';
+
+/**
+ * State of one provider's entry for a central skill: `native` means the provider
+ * reads the central folder itself, so no link is needed; `linked` is a live link;
+ * `copy_in_sync` and `copy_drifted` describe a copy that matches or differs from
+ * the central folder; `broken` is a link that no longer resolves; `conflict` is
+ * something else already at that path (never touched); `unlinked` is nothing.
+ */
+export type CentralSkillProviderState =
+  | 'native'
+  | 'linked'
+  | 'copy_in_sync'
+  | 'copy_drifted'
+  | 'broken'
+  | 'conflict'
+  | 'unlinked';
+
+/** One provider's status for a central skill, with where its link lives and how it was made (when linked). */
+export type CentralSkillProviderStatus = {
+  provider: LLMProvider;
+  state: CentralSkillProviderState;
+  mode?: CentralSkillLinkMode;
+  path?: string;
+};
+
+/**
+ * A skill folder in the central user skills directory (`~/.agents/skills`),
+ * with its status for every provider. `directoryName` is the folder name used
+ * in all operations; `name` and `description` come from its `SKILL.md`.
+ */
+export type CentralSkill = {
+  directoryName: string;
+  name: string;
+  description: string;
+  sourcePath: string;
+  providers: CentralSkillProviderStatus[];
+};
+
+/** Outcome of linking, unlinking or re-applying a central skill for one provider. */
+export type CentralSkillApplyResult = {
+  provider: LLMProvider;
+  outcome: 'linked' | 'copied' | 'unlinked' | 'already_linked' | 'conflict' | 'failed';
+  error?: string;
+};
+
+// ---------------------------
 //----------------- SHARED ERROR TYPES ------------
 /**
  * Optional metadata used when constructing application-level errors.

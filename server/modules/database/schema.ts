@@ -302,6 +302,23 @@ CREATE TABLE IF NOT EXISTS mcp_central_targets (
 );
 `;
 
+/**
+ * Links the app created from a central skill folder into a provider's skill folder.
+ *
+ * A row means the app made (and may remove) the entry `<provider skills dir>/<skill_name>`.
+ * Symlinks and junctions are recognised on disk, so rows matter most for `copy`,
+ * which cannot be told apart from a user's own folder without this record.
+ */
+export const SKILL_CENTRAL_LINKS_TABLE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS skill_central_links (
+    skill_name TEXT NOT NULL,
+    provider TEXT NOT NULL CHECK (provider IN ('claude', 'cursor', 'codex', 'opencode', 'kiro')),
+    mode TEXT NOT NULL CHECK (mode IN ('symlink', 'junction', 'copy')),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (skill_name, provider)
+);
+`;
+
 export const INIT_SCHEMA_SQL = `
 -- Initialize authentication database
 PRAGMA foreign_keys = ON;
@@ -359,4 +376,6 @@ ${SUPERSEDED_PROVIDER_SESSIONS_TABLE_SCHEMA_SQL}
 ${MCP_CENTRAL_SERVERS_TABLE_SCHEMA_SQL}
 
 ${MCP_CENTRAL_TARGETS_TABLE_SCHEMA_SQL}
+
+${SKILL_CENTRAL_LINKS_TABLE_SCHEMA_SQL}
 `;
