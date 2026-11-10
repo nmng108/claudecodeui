@@ -1,8 +1,8 @@
-import { Edit3, ExternalLink, FileJson, Globe, Lock, Plus, Server, Terminal, Trash2, Users, Zap } from 'lucide-react';
+import { Edit3, ExternalLink, FileJson, Globe, Link2, Lock, Plus, Server, Terminal, Trash2, Users, Zap } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { McpProject, McpProvider, McpScope, ProviderMcpServer } from '@/shared/types';
+import type { CentralMcpServer, McpFormState, McpProject, McpProvider, McpScope, ProviderMcpServer } from '@/shared/types';
 import { IS_PLATFORM } from '@/shared/utils';
 import { ActionMenu, Badge, Button } from '@/shared/ui';
 import { MCP_GLOBAL_SUPPORTED_TRANSPORTS, MCP_PROVIDER_NAMES, MCP_SUPPORTS_ENABLE_TOGGLE } from '@/shared/constants';
@@ -10,6 +10,9 @@ import { useMcpServers } from '@/modules/mcp/hooks/useMcpServers';
 import { maskSecret } from '@/modules/mcp/utils/mcpFormatting';
 import McpServerFormModal from '@/modules/mcp/McpServerFormModal';
 import McpRawConfigModal from '@/modules/mcp/McpRawConfigModal';
+import CentralMcpModal from '@/modules/mcp/CentralMcpModal';
+import { describeCentralFailures, useCentralMcpServers } from '@/modules/mcp/hooks/useCentralMcpServers';
+import { createMcpPayloadFromForm, getErrorMessage } from '@/modules/mcp/utils/mcpFormatting';
 
 type McpServersProps = {
   selectedProvider: McpProvider;
@@ -140,13 +143,64 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
     closeForm,
     submitForm,
     submitGlobalForm,
-    deleteServer,
-    toggleServerEnabled,
+    deleteServer: deleteProviderServer,
+    toggleServerEnabled: toggleProviderServerEnabled,
     reloadServers,
   } = useMcpServers({ selectedProvider, currentProjects });
 
   // Whether the raw config editor is open; local to this list since nothing else needs it.
   const [isRawEditorOpen, setIsRawEditorOpen] = useState(false);
+  // Whether the shared servers dialog is open.
+  const [isSharedOpen, setIsSharedOpen] = useState(false);
+  // The shared server being edited in the form, if any; the form modal is mounted only while this is set.
+  const [editingShared, setEditingShared] = useState<CentralMcpServer | null>(null);
+  // Problem from the last shared-server action on a row, shown above the list.
+  const [sharedError, setSharedError] = useState<string | null>(null);
+  const central = useCentralMcpServers();
+
+  const findShared = (server: ProviderMcpServer): CentralMcpServer | undefined => central.servers.find((candidate) => (
+    candidate.name === server.name
+    && candidate.scope === server.scope
+    && (candidate.workspacePath ?? '') === (server.workspacePath ?? '')
+  ));
+
+  // Runs a shared-server action from a list row and refreshes both lists afterwards.
+  const runSharedAction = async (action: () => Promise<Parameters<typeof describeCentralFailures>[0]>) => {
+    setSharedError(null);
+    try {
+      setSharedError(describeCentralFailures(await action()));
+    } catch (error) {
+      setSharedError(getErrorMessage(error));
+    }
+
+    await reloadServers();
+  };
+
+  const submitSharedEdit = async (formData: McpFormState) => {
+    if (!editingShared) {
+      return;
+    }
+
+    const payload = createMcpPayloadFromForm(selectedProvider, formData, {
+      supportedTransports: MCP_GLOBAL_SUPPORTED_TRANSPORTS,
+      supportsWorkingDirectory: false,
+      includeProviderSpecificFields: false,
+    });
+    const failures = describeCentralFailures(await central.update(editingShared.id, {
+      transport: payload.transport,
+      command: payload.command,
+      args: payload.args,
+      env: payload.env,
+      url: payload.url,
+      headers: payload.headers,
+    }));
+    await reloadServers();
+    if (failures) {
+      throw new Error(failures);
+    }
+
+    setEditingShared(null);
+  };
 
   const providerName = MCP_PROVIDER_NAMES[selectedProvider];
   const description = t(`mcpServers.description.${selectedProvider}`, {
@@ -169,6 +223,11 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
           </div>
         </div>
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+        <Button variant="outline" onClick={() => setIsSharedOpen(true)} className="w-full sm:w-auto">
+          <Link2 className="mr-2 h-4 w-4" />
+          {t('mcpShared.openButton', { defaultValue: 'Shared servers' })}
+          {central.servers.length > 0 && ` (${central.servers.length})`}
+        </Button>
         <Button variant="outline" onClick={() => setIsRawEditorOpen(true)} className="w-full sm:w-auto">
           <FileJson className="mr-2 h-4 w-4" />
           {t('mcpRaw.openButton', { defaultValue: 'Edit config' })}
@@ -209,6 +268,12 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
         </div>
       </div>
 
+      {sharedError && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-900/20 dark:text-amber-200">
+          {sharedError}
+        </div>
+      )}
+
       {(loadError || deleteError) && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800/60 dark:bg-red-900/20 dark:text-red-200">
           {deleteError || loadError}
@@ -222,6 +287,8 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
 
         {servers.map((server) => {
           const managed = isManagedServer(server);
+          const shared = findShared(server);
+          const sharedTarget = shared?.targets.find((target) => target.provider === selectedProvider);
 
           return (
             <div key={getServerKey(server)} className="rounded-lg border border-border bg-card/50 p-4">
@@ -250,6 +317,18 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
                         )}
                       </>
                     )}
+                    {shared && sharedTarget && (
+                      <Badge
+                        variant="outline"
+                        className={`gap-1 text-xs ${sharedTarget.state === 'drifted' ? 'border-amber-400 text-amber-700 dark:text-amber-400' : 'text-muted-foreground'}`}
+                        title={sharedTarget.differences.join(', ')}
+                      >
+                        <Link2 className="h-3 w-3" />
+                        {sharedTarget.state === 'drifted'
+                          ? t('mcpShared.differsBadge', { defaultValue: 'Differs from shared' })
+                          : t('mcpShared.sharedBadge', { defaultValue: 'Shared' })}
+                      </Badge>
+                    )}
                     {managed && (
                       <Badge variant="outline" className="gap-1 text-xs text-muted-foreground">
                         <Lock className="h-3 w-3" />
@@ -259,6 +338,17 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
                   </div>
 
                   <div className="space-y-1 text-sm text-muted-foreground">
+                    {shared && sharedTarget?.state === 'drifted' && (
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <span>{t('mcpShared.differsIn', { fields: sharedTarget.differences.join(', '), defaultValue: `Differs from the shared definition in: ${sharedTarget.differences.join(', ')}` })}</span>
+                        <button type="button" className="text-primary hover:underline" onClick={() => void runSharedAction(() => central.resync(shared.id, selectedProvider))}>
+                          {t('mcpShared.reapply', { defaultValue: 'Re-apply' })}
+                        </button>
+                        <button type="button" className="text-primary hover:underline" onClick={() => void runSharedAction(() => central.adopt(shared.id, selectedProvider))}>
+                          {t('mcpShared.useAsShared', { defaultValue: 'Use as shared' })}
+                        </button>
+                      </div>
+                    )}
                     {!managed && (
                       <>
                         <ConfigLine label={t('mcpServers.config.command')}>{server.command || ''}</ConfigLine>
@@ -287,13 +377,29 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
 
                 {!managed && (
                   <div className="ml-4 flex items-center gap-2">
+                    {!shared && server.scope !== 'local' && server.transport !== 'sse' && (
+                      <Button
+                        onClick={() => void runSharedAction(() => central.importEntry({
+                          provider: selectedProvider,
+                          name: server.name,
+                          scope: server.scope,
+                          workspacePath: server.workspacePath,
+                        }))}
+                        variant="ghost"
+                        size="sm"
+                        className="text-muted-foreground hover:text-foreground"
+                        title={t('mcpShared.shareAction', { defaultValue: 'Manage as a shared server' })}
+                      >
+                        <Link2 className="h-4 w-4" />
+                      </Button>
+                    )}
                     {MCP_SUPPORTS_ENABLE_TOGGLE[selectedProvider] && server.enabled !== undefined && (
                       <EnabledSwitch
                         checked={server.enabled}
                         label={server.enabled
                           ? t('mcpServers.actions.disable', { defaultValue: 'Disable server' })
                           : t('mcpServers.actions.enable', { defaultValue: 'Enable server' })}
-                        onChange={(next) => void toggleServerEnabled(server, next)}
+                        onChange={(next) => void toggleProviderServerEnabled(server, next).then(central.reload)}
                       />
                     )}
                     <Button
@@ -306,7 +412,7 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
                       <Edit3 className="h-4 w-4" />
                     </Button>
                     <Button
-                      onClick={() => deleteServer(server)}
+                      onClick={() => void deleteProviderServer(server).then(central.reload)}
                       variant="ghost"
                       size="sm"
                       className="text-red-600 hover:text-red-700"
@@ -344,7 +450,10 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
           title={serverForm.editingServer ? undefined : providerButtonLabel}
           submitLabel={providerButtonLabel}
           onClose={closeForm}
-          onSubmit={submitForm}
+          onSubmit={async (formData, editingServer) => {
+            await submitForm(formData, editingServer);
+            await central.reload();
+          }}
         />
       )}
 
@@ -369,7 +478,51 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
           supportedScopes={MCP_GLOBAL_SUPPORTED_SCOPES}
           supportedTransports={MCP_GLOBAL_SUPPORTED_TRANSPORTS}
           onClose={closeForm}
-          onSubmit={(formData) => submitGlobalForm(formData)}
+          onSubmit={async (formData) => {
+            try {
+              await submitGlobalForm(formData);
+            } finally {
+              await central.reload();
+            }
+          }}
+        />
+      )}
+
+      {isSharedOpen && (
+        <CentralMcpModal
+          central={central}
+          onEdit={(server) => {
+            setIsSharedOpen(false);
+            setEditingShared(server);
+          }}
+          onClose={() => setIsSharedOpen(false)}
+          onProvidersChanged={reloadServers}
+        />
+      )}
+
+      {editingShared && (
+        <McpServerFormModal
+          provider={selectedProvider}
+          mode="global"
+          editingServer={{
+            provider: selectedProvider,
+            name: editingShared.name,
+            scope: editingShared.scope,
+            transport: editingShared.transport,
+            command: editingShared.command,
+            args: editingShared.args,
+            env: editingShared.env,
+            url: editingShared.url,
+            headers: editingShared.headers,
+            workspacePath: editingShared.workspacePath,
+          }}
+          currentProjects={currentProjects}
+          title={t('mcpShared.editTitle', { defaultValue: 'Edit shared server' })}
+          description={t('mcpShared.editDescription', { defaultValue: 'Changes are written to every provider this server is linked to.' })}
+          supportedScopes={MCP_GLOBAL_SUPPORTED_SCOPES}
+          supportedTransports={MCP_GLOBAL_SUPPORTED_TRANSPORTS}
+          onClose={() => setEditingShared(null)}
+          onSubmit={submitSharedEdit}
         />
       )}
     </div>

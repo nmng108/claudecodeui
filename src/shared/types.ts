@@ -1304,6 +1304,40 @@ export type ProviderMcpRawConfigWriteResult = ProviderMcpRawConfig & {
   written: boolean;
 };
 
+/** How a linked provider's config compares with a shared MCP server: in_sync matches, drifted has other values (see differences), missing has no entry, paused has none on purpose because the server is switched off for a provider without a native switch. */
+export type CentralMcpTargetState = 'in_sync' | 'drifted' | 'missing' | 'paused';
+
+/** One provider linked to a shared MCP server, with its current comparison result; differences names the fields that differ and error is set when the provider's config could not be read. */
+export type CentralMcpTargetStatus = {
+  provider: McpProvider;
+  enabled: boolean;
+  state: CentralMcpTargetState;
+  differences: string[];
+  error?: string;
+};
+
+/** An MCP server defined once in the app and applied by name to each linked provider, as returned by the shared MCP API. */
+export type CentralMcpServer = {
+  id: number;
+  name: string;
+  scope: Exclude<McpScope, 'local'>;
+  workspacePath?: string;
+  transport: Extract<McpTransport, 'stdio' | 'http'>;
+  command?: string;
+  args?: string[];
+  env?: KeyValueMap;
+  url?: string;
+  headers?: KeyValueMap;
+  targets: CentralMcpTargetStatus[];
+};
+
+/** What an operation on a shared MCP server did for one provider; conflict means an unmanaged entry already uses the name. */
+export type CentralMcpApplyResult = {
+  provider: McpProvider;
+  outcome: 'applied' | 'removed' | 'conflict' | 'failed';
+  error?: string;
+};
+
 /** The complete editable state of the MCP server form, covering the structured connection fields and the raw JSON import text; convert it with createMcpPayloadFromForm before sending it to the API. */
 export type McpFormState = {
   name: string;

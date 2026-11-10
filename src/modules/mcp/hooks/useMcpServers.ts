@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 
 import { api } from '@/shared/api';
 import { MCP_GLOBAL_SUPPORTED_TRANSPORTS, MCP_PROVIDER_NAMES, MCP_SUPPORTED_SCOPES } from '@/shared/constants';
-import type { McpApiResponse, McpFormState, McpProject, McpProvider, McpScope, McpTransport, ProviderMcpServer, UpsertProviderMcpServerPayload } from '@/shared/types';
+import type { CentralMcpApplyResult, McpApiResponse, McpFormState, McpProject, McpProvider, McpScope, McpTransport, ProviderMcpServer, UpsertProviderMcpServerPayload } from '@/shared/types';
 import {
   createMcpPayloadFromForm,
   getApiErrorMessage,
@@ -13,12 +13,6 @@ import {
   isMcpTransport,
 } from '@/modules/mcp/utils/mcpFormatting';
 
-type GlobalMcpServerResult = {
-  provider: McpProvider;
-  created: boolean;
-  error?: string;
-};
-
 type ProviderMcpServerResponse = {
   provider: McpProvider;
   scope: McpScope;
@@ -26,7 +20,7 @@ type ProviderMcpServerResponse = {
 };
 
 type GlobalMcpServerResponse = {
-  results: GlobalMcpServerResult[];
+  results: CentralMcpApplyResult[];
 };
 
 // Internal MCP-side shape; `name` is now filled from the DB projectId since
@@ -177,8 +171,9 @@ const saveProviderServer = async (
 
 const saveGlobalServer = async (
   payload: UpsertProviderMcpServerPayload,
-): Promise<GlobalMcpServerResult[]> => {
-  const response = await api.providers.saveGlobalMcpServer(payload);
+): Promise<CentralMcpApplyResult[]> => {
+  // Adds the server to the shared store, which writes it into every provider.
+  const response = await api.providers.createCentralMcpServer(payload);
   const data = await toResponseJson<McpApiResponse<GlobalMcpServerResponse>>(response);
 
   if (!response.ok || !data.success) {
@@ -206,7 +201,7 @@ const getCacheKey = (provider: McpProvider, projects: ProjectTarget[]): string =
   return `${provider}:${projectKey}`;
 };
 
-const formatGlobalAddFailures = (failures: GlobalMcpServerResult[], t: (key: string) => string): string => (
+const formatGlobalAddFailures = (failures: CentralMcpApplyResult[], t: (key: string) => string): string => (
   failures
     .map((failure) => `${MCP_PROVIDER_NAMES[failure.provider]}: ${failure.error || t('mcpServersAddErrors.unknownError')}`)
     .join('; ')
@@ -449,7 +444,7 @@ export function useMcpServers({ selectedProvider, currentProjects }: UseMcpServe
       mcpServersCache.clear();
       await refreshServers({ force: true });
 
-      const failures = results.filter((result) => !result.created);
+      const failures = results.filter((result) => result.outcome === 'conflict' || result.outcome === 'failed');
       if (failures.length > 0) {
         setSaveStatus('error');
         throw new Error(t('mcpServersAddErrors.globalAddFailed', { details: formatGlobalAddFailures(failures, t) }));

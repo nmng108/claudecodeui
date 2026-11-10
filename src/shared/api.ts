@@ -548,13 +548,25 @@ export const api = {
         dryRun?: boolean;
       },
     ) => put(`/api/providers/${provider}/mcp/config`, payload),
+    centralMcpServers: () => get('/api/providers/mcp/central/servers'),
+    createCentralMcpServer: (payload: unknown) => post('/api/providers/mcp/central/servers', payload),
+    updateCentralMcpServer: (id: number, payload: unknown) =>
+      patch(`/api/providers/mcp/central/servers/${id}`, payload),
+    setCentralMcpServerEnabled: (id: number, payload: { enabled: boolean; providers?: string[] }) =>
+      patch(`/api/providers/mcp/central/servers/${id}/enabled`, payload),
+    resyncCentralMcpServer: (id: number, payload: { provider?: string } = {}) =>
+      post(`/api/providers/mcp/central/servers/${id}/resync`, payload),
+    adoptCentralMcpServer: (id: number, payload: { provider: string }) =>
+      post(`/api/providers/mcp/central/servers/${id}/adopt`, payload),
+    importCentralMcpServer: (payload: { provider: string; name: string; scope: string; workspacePath?: string }) =>
+      post('/api/providers/mcp/central/import', payload),
+    deleteCentralMcpServer: (id: number) => del(`/api/providers/mcp/central/servers/${id}`),
     setMcpServerEnabled: (
       provider: string,
       serverName: string,
       payload: { enabled: boolean; scope: string; workspacePath?: string },
     ) =>
       patch(`/api/providers/${provider}/mcp/servers/${encodeURIComponent(serverName)}/enabled`, payload),
-    saveGlobalMcpServer: (payload: unknown) => post('/api/providers/mcp/servers/global', payload),
 
     skills: (provider: string, { workspacePath }: { workspacePath?: string } = {}) =>
       get(`/api/providers/${encodeURIComponent(provider)}/skills${query({ workspacePath })}`),
