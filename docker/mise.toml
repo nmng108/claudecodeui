@@ -27,3 +27,4 @@ disable_tools = ["node"]
 [tools]
 python = "latest"
 java = ["temurin-21", "temurin-8", "temurin-25"]
+maven = "latest"

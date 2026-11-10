@@ -59,6 +59,9 @@ services:
       - dev-dind-certs-client:/certs/client:ro
       # Language runtimes (docker/mise.toml) plus any added with `mise use -g`
       - dev-mise-data:/mise
+      # Maven settings (repository credentials). Set MAVEN_SETTINGS_PATH in .env.compose to a
+      # file outside the repository; otherwise an empty stub is mounted.
+      - ${MAVEN_SETTINGS_PATH:-./docker/maven-settings.stub.xml}:/home/agent/.m2/settings.xml:ro
     restart: unless-stopped
     depends_on:
       dev-ssh-agent:

@@ -89,7 +89,7 @@ RUN userdel -r node 2>/dev/null || true; \
     useradd -m -u "${AGENT_UID}" -g agent -d /home/agent -s /bin/bash agent && \
     mkdir -p /workspace /mise /app/node_modules /home/agent/.npm \
         /home/agent/.claude /home/agent/.kiro /home/agent/.cloudcli \
-        /home/agent/.local/share/kiro-cli /home/agent/.ssh && \
+        /home/agent/.local/share/kiro-cli /home/agent/.ssh /home/agent/.m2 && \
     chmod 700 /home/agent/.ssh && \
     chown -R agent:agent /workspace /mise /app /home/agent
 
