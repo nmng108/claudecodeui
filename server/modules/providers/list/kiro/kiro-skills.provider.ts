@@ -27,4 +27,13 @@ export class KiroSkillsProvider extends SkillsProvider {
       },
     ];
   }
+
+  // Skills added from the UI are written to the user-level Kiro skills directory.
+  protected async getGlobalSkillSource(): Promise<ProviderSkillSource> {
+    return {
+      scope: 'user',
+      rootDir: path.join(os.homedir(), '.kiro', 'skills'),
+      commandPrefix: '/',
+    };
+  }
 }

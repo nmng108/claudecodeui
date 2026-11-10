@@ -490,6 +490,36 @@ test('providerSkillsService lists kiro user and project skills', { concurrency: 
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
+/**
+ * This test covers managed global skill add and remove for Kiro, which writes
+ * to the user-level `~/.kiro/skills` directory.
+ */
+test('providerSkillsService adds and removes kiro global skills', { concurrency: false }, async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-skills-kiro-write-'));
+  const restoreHomeDir = patchHomeDir(tempRoot);
+  try {
+    const created = await providerSkillsService.addProviderSkills('kiro', {
+      entries: [{
+        directoryName: 'kiro-managed',
+        content: '---\nname: kiro-managed\ndescription: Managed Kiro skill\n---\nBody.',
+      }],
+    });
+    assert.equal(created.length, 1);
+    assert.equal(created[0].scope, 'user');
+    assert.equal(created[0].sourcePath, path.join(tempRoot, '.kiro', 'skills', 'kiro-managed', 'SKILL.md'));
+
+    const listed = await providerSkillsService.listProviderSkills('kiro', { workspacePath: tempRoot });
+    assert.ok(listed.some((skill) => skill.name === 'kiro-managed'));
+
+    const removed = await providerSkillsService.removeProviderSkill('kiro', { directoryName: 'kiro-managed' });
+    assert.equal(removed.removed, true);
+    await assert.rejects(fs.stat(path.join(tempRoot, '.kiro', 'skills', 'kiro-managed')), { code: 'ENOENT' });
+  } finally {
+    restoreHomeDir();
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('providerSkillsService lists cursor skills from its configured directories', { concurrency: false }, async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-skills-gc-'));
   const workspacePath = path.join(tempRoot, 'workspace');
