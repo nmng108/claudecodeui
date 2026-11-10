@@ -572,6 +572,18 @@ export const api = {
       get(`/api/providers/${encodeURIComponent(provider)}/skills${query({ workspacePath })}`),
     saveSkills: (provider: string, payload: unknown) =>
       post(`/api/providers/${provider}/skills`, payload),
+    centralSkills: () => get('/api/providers/skills/central'),
+    addCentralSkills: (payload: unknown) => post('/api/providers/skills/central', payload),
+    linkCentralSkill: (directoryName: string, payload: { providers?: string[]; mode?: 'copy' } = {}) =>
+      post(`/api/providers/skills/central/${encodeURIComponent(directoryName)}/link`, payload),
+    unlinkCentralSkill: (directoryName: string, payload: { providers?: string[] } = {}) =>
+      post(`/api/providers/skills/central/${encodeURIComponent(directoryName)}/unlink`, payload),
+    resyncCentralSkill: (directoryName: string, payload: { providers?: string[] } = {}) =>
+      post(`/api/providers/skills/central/${encodeURIComponent(directoryName)}/resync`, payload),
+    adoptCentralSkill: (payload: { provider: string; directoryName: string }) =>
+      post('/api/providers/skills/central/adopt', payload),
+    deleteCentralSkill: (directoryName: string) =>
+      del(`/api/providers/skills/central/${encodeURIComponent(directoryName)}`),
   },
 
   // Slash commands

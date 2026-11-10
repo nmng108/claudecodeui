@@ -6,6 +6,7 @@ import {
   FileText,
   FileUp,
   FolderUp,
+  Link2,
   Loader2,
   Plus,
   RefreshCw,
@@ -25,6 +26,8 @@ import {
   Input,
 } from '@/shared/ui';
 import { useProviderSkills } from '@/modules/skills/hooks/useProviderSkills';
+import { describeCentralSkillProblems, useCentralSkills } from '@/modules/skills/hooks/useCentralSkills';
+import CentralSkillsModal from '@/modules/skills/CentralSkillsModal';
 import type { ProviderSkill, ProviderSkillCreateEntryPayload, SkillsProject, SkillsProvider, SkillsScope } from '@/shared/types';
 
 type ProviderSkillsProps = {
@@ -196,7 +199,15 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
     saveStatus,
     addSkills,
     refreshSkills,
+    reloadSkills,
   } = useProviderSkills({ selectedProvider, currentProjects });
+  const central = useCentralSkills();
+  // Whether the shared skills dialog is open.
+  const [isSharedOpen, setIsSharedOpen] = useState(false);
+  // Add dialog choice: put the skill in the shared folder and link it into every provider instead of only this one.
+  const [addToShared, setAddToShared] = useState(false);
+  // Problem from the last Share action on a skill card.
+  const [shareError, setShareError] = useState<string | null>(null);
   const [queuedFiles, setQueuedFiles] = useState<QueuedSkillFile[]>([]);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -350,7 +361,13 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
           )
           : undefined,
       })));
-      await addSkills({ entries });
+      if (addToShared) {
+        const problems = describeCentralSkillProblems(await central.addSkills({ entries }));
+        await reloadSkills();
+        setShareError(problems);
+      } else {
+        await addSkills({ entries });
+      }
       setQueuedFiles([]);
       setJustInstalled(true);
       setIsAddDialogOpen(false);
@@ -359,7 +376,7 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
     } finally {
       setIsSubmitting(false);
     }
-  }, [addSkills, queuedFiles, t]);
+  }, [addSkills, addToShared, central, queuedFiles, reloadSkills, t]);
 
   const handleAddDialogOpenChange = useCallback((open: boolean) => {
     if (open) {
@@ -376,6 +393,49 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
     setJustInstalled(false);
     setIsAddDialogOpen(false);
   }, []);
+
+  // Shared-folder status of a skill card, matched by skill folder name; user skills of providers
+  // that need links get a Share action when the skill is not in the shared folder yet.
+  const renderSharedStatus = (skill: ProviderSkill) => {
+    const directoryName = skill.sourcePath ? skill.sourcePath.split(/[\\/]/).slice(-2, -1)[0] : '';
+    const shared = central.skills.find((candidate) => candidate.directoryName === directoryName);
+    const status = shared?.providers.find((entry) => entry.provider === selectedProvider);
+    if (shared && status) {
+      const differs = status.state === 'copy_drifted' || status.state === 'broken' || status.state === 'conflict';
+      return (
+        <Badge variant="outline" className={cn('gap-1 rounded-full bg-background/70', differs && 'border-amber-400 text-amber-700 dark:text-amber-400')}>
+          <Link2 className="h-3 w-3" />
+          {status.state === 'copy_drifted'
+            ? t('skillsShared.badgeDrifted', { defaultValue: 'Copy differs from shared' })
+            : status.state === 'broken'
+              ? t('skillsShared.badgeBroken', { defaultValue: 'Shared link broken' })
+              : status.state === 'conflict'
+                ? t('skillsShared.badgeConflict', { defaultValue: 'Not the shared skill' })
+                : t('skillsShared.badgeShared', { defaultValue: 'Shared' })}
+        </Badge>
+      );
+    }
+
+    if (skill.scope === 'user' && directoryName && selectedProvider !== 'opencode' && selectedProvider !== 'codex' && !skill.pluginName) {
+      return (
+        <button
+          type="button"
+          className="text-xs text-primary hover:underline"
+          onClick={() => {
+            setShareError(null);
+            void central.adopt(selectedProvider, directoryName)
+              .then((results) => setShareError(describeCentralSkillProblems(results)))
+              .catch((error: unknown) => setShareError(error instanceof Error ? error.message : 'Failed to share skill'))
+              .then(() => reloadSkills());
+          }}
+        >
+          {t('skillsShared.share', { defaultValue: 'Share' })}
+        </button>
+      );
+    }
+
+    return null;
+  };
 
   const uploadPanel = (
     <div className="space-y-4">
@@ -549,6 +609,17 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
             {t('skillsPage.addSkill')}
           </Button>
           <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="w-full sm:w-auto"
+            onClick={() => setIsSharedOpen(true)}
+          >
+            <Link2 className="h-4 w-4" />
+            {t('skillsShared.openButton', { defaultValue: 'Shared skills' })}
+            {central.skills.length > 0 && ` (${central.skills.length})`}
+          </Button>
+          <Button
             onClick={() => void refreshSkills({ force: true })}
             variant="outline"
             size="sm"
@@ -620,6 +691,12 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
               )}
             </div>
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center">
+              {selectedProvider !== 'opencode' && (
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input type="checkbox" checked={addToShared} onChange={(event) => setAddToShared(event.target.checked)} />
+                  {t('skillsShared.addToShared', { defaultValue: 'Add to shared folder and link to all providers' })}
+                </label>
+              )}
               <Button
                 type="button"
                 variant="outline"
@@ -646,6 +723,16 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
           </div>
         </DialogContent>
       </Dialog>
+
+      {isSharedOpen && (
+        <CentralSkillsModal central={central} onClose={() => setIsSharedOpen(false)} onChanged={reloadSkills} />
+      )}
+
+      {shareError && !isAddDialogOpen && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-900/20 dark:text-amber-200">
+          {shareError}
+        </div>
+      )}
 
       {!isAddDialogOpen && (submitError || loadError) && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800/60 dark:bg-red-900/20 dark:text-red-200">
@@ -726,6 +813,7 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
                         {t('skillsPage.projectBadge', { name: skill.projectDisplayName })}
                       </Badge>
                     )}
+                    {renderSharedStatus(skill)}
                   </div>
 
                   <div className="mt-4 min-w-0 rounded-lg border border-border/60 bg-muted/20 px-3 py-2">

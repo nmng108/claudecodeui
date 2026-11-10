@@ -1912,6 +1912,32 @@ type SnippetHighlight = {
 /** The LLM provider whose skills are being listed, uploaded or deleted; use it to target the provider-specific skills endpoints. */
 export type SkillsProvider = LLMProvider;
 
+/** How a provider's skill entry relates to the shared skills folder: native means the provider reads that folder itself, linked is a live link, copy_in_sync/copy_drifted is a snapshot that matches or differs, broken is a dangling link, conflict is an unrelated folder at that path (never touched), unlinked is nothing. */
+export type CentralSkillState = 'native' | 'linked' | 'copy_in_sync' | 'copy_drifted' | 'broken' | 'conflict' | 'unlinked';
+
+/** One provider's status for a shared skill, as returned by the shared skills API; mode is how a link was made. */
+export type CentralSkillProviderStatus = {
+  provider: SkillsProvider;
+  state: CentralSkillState;
+  mode?: 'symlink' | 'junction' | 'copy';
+};
+
+/** A skill in the shared skills folder (~/.agents/skills) with its status for every provider; directoryName identifies it in all shared-skill requests. */
+export type CentralSkill = {
+  directoryName: string;
+  name: string;
+  description: string;
+  sourcePath: string;
+  providers: CentralSkillProviderStatus[];
+};
+
+/** What a shared-skill operation did for one provider; conflict means something unmanaged is in the way and was left alone. */
+export type CentralSkillApplyResult = {
+  provider: SkillsProvider;
+  outcome: 'linked' | 'copied' | 'unlinked' | 'already_linked' | 'conflict' | 'failed';
+  error?: string;
+};
+
 /** Where a skill was discovered - the user's home directory, a project, a plugin, the repository, an admin location, or the built-in system set - used to group, order and label skills and to decide whether one can be deleted. */
 export type SkillsScope = 'user' | 'project' | 'plugin' | 'repo' | 'admin' | 'system';
 

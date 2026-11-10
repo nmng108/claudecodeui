@@ -332,6 +332,13 @@ export function useProviderSkills({ selectedProvider, currentProjects }: UseProv
     }
   }, [refreshSkills, selectedProvider]);
 
+  // Called after a change made through the shared skills dialog: links change what every
+  // provider lists, so all cached lists are dropped before the visible one is re-read.
+  const reloadSkills = useCallback(async () => {
+    skillsCache.clear();
+    await refreshSkills({ force: true });
+  }, [refreshSkills]);
+
   useEffect(() => {
     void refreshSkills();
 
@@ -361,5 +368,6 @@ export function useProviderSkills({ selectedProvider, currentProjects }: UseProv
     saveStatus,
     addSkills,
     refreshSkills,
+    reloadSkills,
   };
 }
