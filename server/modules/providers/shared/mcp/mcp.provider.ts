@@ -1,15 +1,24 @@
+import { createHash } from 'node:crypto';
+import { copyFile, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+
+import TOML from '@iarna/toml';
 
 import type { IProviderMcp } from '@/shared/interfaces.js';
 import type {
   LLMProvider,
+  McpRawConfigDocument,
+  McpRawConfigFormat,
   McpScope,
   McpTransport,
+  ProviderMcpRawConfig,
+  ProviderMcpRawConfigWriteResult,
   ProviderMcpServer,
   SetProviderMcpServerEnabledInput,
   UpsertProviderMcpServerInput,
+  WriteProviderMcpRawConfigInput,
 } from '@/shared/types.js';
-import { AppError, readObjectRecord } from '@/shared/utils.js';
+import { AppError, parseJsoncText, readObjectRecord } from '@/shared/utils.js';
 
 const resolveWorkspacePath = (workspacePath?: string): string =>
   path.resolve(workspacePath ?? process.cwd());
@@ -26,6 +35,66 @@ const normalizeServerName = (name: string): string => {
   return normalized;
 };
 
+const hashRawContent = (content: string): string => createHash('sha256').update(content).digest('hex');
+
+const invalidRawConfig = (message: string): AppError => new AppError(message, {
+  code: 'MCP_CONFIG_INVALID',
+  statusCode: 422,
+});
+
+/**
+ * Parses raw config text in the provider's format. Blank text is an empty
+ * document; anything that is not an object is rejected.
+ */
+const parseRawConfigContent = (format: McpRawConfigFormat, content: string): Record<string, unknown> => {
+  if (!content.trim()) {
+    return {};
+  }
+
+  let parsed: unknown;
+  try {
+    if (format === 'toml') {
+      parsed = TOML.parse(content);
+    } else if (format === 'jsonc') {
+      parsed = parseJsoncText(content);
+    } else {
+      parsed = JSON.parse(content);
+    }
+  } catch (error) {
+    throw invalidRawConfig(`Config is not valid ${format.toUpperCase()}: ${error instanceof Error ? error.message : 'parse error'}`);
+  }
+
+  const record = readObjectRecord(parsed);
+  if (!record) {
+    throw invalidRawConfig('Config must be an object at the top level.');
+  }
+
+  return record;
+};
+
+const serializeRawConfig = (format: McpRawConfigFormat, document: Record<string, unknown>): string =>
+  format === 'toml' ? TOML.stringify(document as never) : `${JSON.stringify(document, null, 2)}\n`;
+
+/** Writes via temp file + rename, keeping the existing file's permissions (these files hold secrets). */
+const writeTextFileAtomic = async (filePath: string, content: string): Promise<void> => {
+  await mkdir(path.dirname(filePath), { recursive: true });
+  const mode = await stat(filePath).then((stats) => stats.mode & 0o777).catch(() => 0o600);
+  const tempPath = `${filePath}.${process.pid}.tmp`;
+  await writeFile(tempPath, content, { encoding: 'utf8', mode });
+  await rename(tempPath, filePath);
+};
+
+/** Keeps one copy of the previous file next to it so a bad edit can be undone by hand. */
+const backupExistingFile = async (filePath: string): Promise<void> => {
+  await copyFile(filePath, `${filePath}.cloudcli.bak`).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'ENOENT') {
+      throw error;
+    }
+  });
+};
+
+const sameJson = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
+
 /**
  * Shared MCP provider for provider-specific config readers/writers.
  */
@@ -40,6 +109,9 @@ export abstract class McpProvider implements IProviderMcp {
    * the server (for example Kiro's `autoApprove`) is kept as is.
    */
   protected abstract readonly managedConfigKeys: readonly string[];
+
+  /** Key inside the parsed config document that holds the servers map (`mcpServers`, `mcp_servers`, `mcp`). */
+  protected abstract readonly rawServersKey: string;
 
   /** True when the provider's config has a native per-server on/off field. */
   protected readonly supportsEnableToggle: boolean = false;
@@ -171,6 +243,157 @@ export abstract class McpProvider implements IProviderMcp {
     }
 
     return { removed, provider: this.provider, name: normalizedName, scope };
+  }
+
+  async readRawConfig(input: { scope?: McpScope; workspacePath?: string }): Promise<ProviderMcpRawConfig> {
+    const scope = input.scope ?? 'project';
+    this.assertScope(scope);
+    const document = await this.loadRawDocument(scope, resolveWorkspacePath(input.workspacePath));
+    return this.toRawConfig(scope, document);
+  }
+
+  async writeRawConfig(input: WriteProviderMcpRawConfigInput): Promise<ProviderMcpRawConfigWriteResult> {
+    const scope = input.scope ?? 'project';
+    this.assertScope(scope);
+    if (typeof input.content !== 'string') {
+      throw invalidRawConfig('content must be a string.');
+    }
+
+    const workspacePath = resolveWorkspacePath(input.workspacePath);
+    const document = await this.loadRawDocument(scope, workspacePath);
+    if (input.expectedHash && input.expectedHash !== hashRawContent(document.content)) {
+      throw new AppError('The MCP config changed on disk since it was loaded. Reload it and apply your edit again.', {
+        code: 'MCP_CONFIG_CHANGED',
+        statusCode: 409,
+      });
+    }
+
+    // A broken existing file must stay fixable through a replace, so it is not fatal here.
+    let existingDocument: Record<string, unknown> | null = null;
+    try {
+      existingDocument = parseRawConfigContent(document.format, document.content);
+    } catch {
+      existingDocument = null;
+    }
+    const existingServers = readObjectRecord(existingDocument?.[this.rawServersKey]) ?? {};
+
+    const incoming = parseRawConfigContent(document.format, input.content);
+    let nextContent: string;
+    let nextServers: Record<string, unknown>;
+    if (input.mode === 'merge') {
+      if (!existingDocument) {
+        throw invalidRawConfig('The existing config cannot be parsed, so servers cannot be merged into it. Use replace instead.');
+      }
+
+      nextServers = { ...existingServers, ...this.readIncomingServers(incoming) };
+      nextContent = serializeRawConfig(document.format, { ...existingDocument, [this.rawServersKey]: nextServers });
+    } else {
+      nextServers = readObjectRecord(incoming[this.rawServersKey]) ?? {};
+      nextContent = input.content;
+    }
+
+    this.assertServersValid(scope, existingServers, nextServers);
+
+    const nextNames = Object.keys(nextServers);
+    const result: ProviderMcpRawConfigWriteResult = {
+      ...this.toRawConfig(scope, { ...document, content: nextContent, exists: document.exists || !input.dryRun }),
+      added: nextNames.filter((name) => !(name in existingServers)),
+      changed: nextNames.filter((name) => name in existingServers && !sameJson(existingServers[name], nextServers[name])),
+      removed: Object.keys(existingServers).filter((name) => !(name in nextServers)),
+      written: false,
+    };
+
+    if (!input.dryRun) {
+      await this.persistRawDocument(scope, workspacePath, document, nextContent);
+      result.written = true;
+    }
+
+    return result;
+  }
+
+  /** Reads the config document for a scope; shared-file providers override this to expose only the MCP section. */
+  protected async loadRawDocument(scope: McpScope, workspacePath: string): Promise<McpRawConfigDocument> {
+    const { filePath, format } = await this.resolveRawConfigFile(scope, workspacePath);
+    try {
+      return { filePath, format, content: await readFile(filePath, 'utf8'), exists: true, partial: false };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return { filePath, format, content: '', exists: false, partial: false };
+      }
+
+      throw error;
+    }
+  }
+
+  /** Stores validated raw text, backing up the previous file first. */
+  protected async persistRawDocument(
+    _scope: McpScope,
+    _workspacePath: string,
+    document: McpRawConfigDocument,
+    content: string,
+  ): Promise<void> {
+    if (document.exists) {
+      await backupExistingFile(document.filePath);
+    }
+
+    await writeTextFileAtomic(document.filePath, content);
+  }
+
+  /** File and syntax used for a scope by the default whole-file raw editor. */
+  protected abstract resolveRawConfigFile(
+    scope: McpScope,
+    workspacePath: string,
+  ): Promise<{ filePath: string; format: McpRawConfigFormat }>;
+
+  private toRawConfig(scope: McpScope, document: McpRawConfigDocument): ProviderMcpRawConfig {
+    return {
+      provider: this.provider,
+      scope,
+      filePath: document.filePath,
+      format: document.format,
+      content: document.content,
+      exists: document.exists,
+      hash: hashRawContent(document.content),
+      partial: document.partial,
+    };
+  }
+
+  /** Accepts a full document or a bare name-to-server map pasted without its wrapper key. */
+  private readIncomingServers(incoming: Record<string, unknown>): Record<string, unknown> {
+    const wrapped = readObjectRecord(incoming[this.rawServersKey]);
+    if (wrapped) {
+      return wrapped;
+    }
+
+    const values = Object.values(incoming);
+    if (values.length > 0 && values.every((value) => readObjectRecord(value))) {
+      return incoming;
+    }
+
+    throw invalidRawConfig(`Expected a "${this.rawServersKey}" object or a map of server names to server definitions.`);
+  }
+
+  /** Rejects servers this provider cannot read, unless they were already in the file unchanged. */
+  private assertServersValid(
+    scope: McpScope,
+    existingServers: Record<string, unknown>,
+    nextServers: Record<string, unknown>,
+  ): void {
+    const problems: string[] = [];
+    for (const [name, config] of Object.entries(nextServers)) {
+      if (!name.trim()) {
+        problems.push('a server has an empty name');
+      } else if (
+        this.normalizeServerConfig(scope, name, config) === null
+        && !(name in existingServers && sameJson(existingServers[name], config))
+      ) {
+        problems.push(`"${name}" is not a valid ${this.provider} MCP server`);
+      }
+    }
+
+    if (problems.length > 0) {
+      throw invalidRawConfig(`Invalid MCP servers: ${problems.join('; ')}.`);
+    }
   }
 
   protected abstract readScopedServers(

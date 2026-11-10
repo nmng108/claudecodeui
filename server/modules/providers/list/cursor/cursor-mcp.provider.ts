@@ -15,6 +15,16 @@ import {
 
 export class CursorMcpProvider extends McpProvider {
   protected readonly managedConfigKeys = ['command', 'args', 'env', 'cwd', 'url', 'headers'] as const;
+  protected readonly rawServersKey = 'mcpServers';
+
+  protected async resolveRawConfigFile(scope: McpScope, workspacePath: string) {
+    return {
+      filePath: scope === 'user'
+        ? path.join(os.homedir(), '.cursor', 'mcp.json')
+        : path.join(workspacePath, '.cursor', 'mcp.json'),
+      format: 'json' as const,
+    };
+  }
 
   constructor() {
     super('cursor', ['user', 'project'], ['stdio', 'http']);

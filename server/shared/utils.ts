@@ -673,6 +673,76 @@ export const readStringRecord = (value: unknown): Record<string, string> | undef
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 };
 
+/**
+ * Removes JSONC comments without touching comment-like text inside strings.
+ */
+const stripJsonComments = (content: string): string => {
+  let output = '';
+  let inString = false;
+  let quote = '';
+  let escaped = false;
+
+  for (let index = 0; index < content.length; index += 1) {
+    const char = content[index];
+    const next = content[index + 1];
+
+    if (inString) {
+      output += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === quote) {
+        inString = false;
+        quote = '';
+      }
+      continue;
+    }
+
+    if (char === '"' || char === '\'') {
+      inString = true;
+      quote = char;
+      output += char;
+      continue;
+    }
+
+    if (char === '/' && next === '/') {
+      while (index < content.length && content[index] !== '\n') {
+        index += 1;
+      }
+      output += '\n';
+      continue;
+    }
+
+    if (char === '/' && next === '*') {
+      index += 2;
+      while (index < content.length && !(content[index] === '*' && content[index + 1] === '/')) {
+        index += 1;
+      }
+      index += 1;
+      continue;
+    }
+
+    output += char;
+  }
+
+  return output;
+};
+
+const stripTrailingCommas = (content: string): string =>
+  content.replace(/,\s*([}\]])/g, '$1');
+
+/**
+ * Parses JSON that may contain `//` and block comments or trailing commas
+ * (JSONC), as OpenCode config files do.
+ *
+ * Throws the underlying `SyntaxError` for malformed input, so callers decide
+ * whether that is a 422 for user-supplied text or a hard failure. Comments are
+ * discarded, so never use the result to rewrite a file that should keep them.
+ */
+export const parseJsoncText = (content: string): unknown =>
+  JSON.parse(stripTrailingCommas(stripJsonComments(content)));
+
 // ---------------------------
 //----------------- PROVIDER MODEL LOOKUP UTILITIES ------------
 /**

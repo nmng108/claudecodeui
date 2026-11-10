@@ -911,6 +911,49 @@ router.post(
   }),
 );
 
+router.get(
+  '/:provider/mcp/config',
+  asyncHandler(async (req: Request, res: Response) => {
+    const provider = parseProvider(req.params.provider);
+    const config = await providerMcpService.readProviderMcpRawConfig(provider, {
+      scope: parseMcpScope(req.query.scope),
+      workspacePath: readOptionalQueryString(req.query.workspacePath),
+    });
+    res.json(createApiSuccessResponse({ config }));
+  }),
+);
+
+router.put(
+  '/:provider/mcp/config',
+  asyncHandler(async (req: Request, res: Response) => {
+    const provider = parseProvider(req.params.provider);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (typeof body.content !== 'string') {
+      throw new AppError('content must be a string.', {
+        code: 'MCP_CONFIG_CONTENT_REQUIRED',
+        statusCode: 400,
+      });
+    }
+
+    if (body.mode !== undefined && body.mode !== 'replace' && body.mode !== 'merge') {
+      throw new AppError('mode must be "replace" or "merge".', {
+        code: 'INVALID_MCP_CONFIG_MODE',
+        statusCode: 400,
+      });
+    }
+
+    const result = await providerMcpService.writeProviderMcpRawConfig(provider, {
+      scope: parseMcpScope(body.scope),
+      workspacePath: readOptionalQueryString(body.workspacePath),
+      content: body.content,
+      mode: body.mode,
+      expectedHash: readOptionalQueryString(body.expectedHash),
+      dryRun: body.dryRun === true,
+    });
+    res.json(createApiSuccessResponse({ result }));
+  }),
+);
+
 router.patch(
   '/:provider/mcp/servers/:name/enabled',
   asyncHandler(async (req: Request, res: Response) => {

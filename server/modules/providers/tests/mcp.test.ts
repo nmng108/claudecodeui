@@ -558,3 +558,120 @@ test('providerMcpService toggles codex and opencode servers and rejects claude a
     await fs.rm(tempRoot, { recursive: true, force: true });
   }
 });
+
+/**
+ * This test covers the raw MCP config editor: reading, previewing, replacing, merging,
+ * the changed-on-disk guard, backups, and validation for a whole-file provider (Kiro).
+ */
+test('providerMcpService reads, previews, replaces and merges raw kiro config', { concurrency: false }, async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-mcp-raw-kiro-'));
+  const configPath = path.join(tempRoot, '.kiro', 'settings', 'mcp.json');
+  await fs.mkdir(path.dirname(configPath), { recursive: true });
+  const original = JSON.stringify({ powers: { x: 1 }, mcpServers: { keep: { command: 'a' }, drop: { command: 'b' } } }, null, 2);
+  await fs.writeFile(configPath, original, 'utf8');
+
+  const restoreHomeDir = patchHomeDir(tempRoot);
+  try {
+    const read = await providerMcpService.readProviderMcpRawConfig('kiro', { scope: 'user' });
+    assert.equal(read.content, original);
+    assert.equal(read.format, 'json');
+    assert.equal(read.partial, false);
+
+    const preview = await providerMcpService.writeProviderMcpRawConfig('kiro', {
+      scope: 'user',
+      content: JSON.stringify({ mcpServers: { keep: { command: 'a2' }, fresh: { url: 'https://example.com/mcp' } } }),
+      dryRun: true,
+    });
+    assert.deepEqual(preview.added, ['fresh']);
+    assert.deepEqual(preview.changed, ['keep']);
+    assert.deepEqual(preview.removed, ['drop']);
+    assert.equal(preview.written, false);
+    assert.equal(await fs.readFile(configPath, 'utf8'), original);
+
+    const replaced = await providerMcpService.writeProviderMcpRawConfig('kiro', {
+      scope: 'user',
+      content: '{"mcpServers":{"only":{"command":"c"}}}',
+      expectedHash: read.hash,
+    });
+    assert.equal(replaced.written, true);
+    assert.equal(await fs.readFile(configPath, 'utf8'), '{"mcpServers":{"only":{"command":"c"}}}');
+    assert.equal(await fs.readFile(`${configPath}.cloudcli.bak`, 'utf8'), original);
+
+    await assert.rejects(
+      providerMcpService.writeProviderMcpRawConfig('kiro', { scope: 'user', content: '{}', expectedHash: read.hash }),
+      (error: unknown) => error instanceof AppError && error.code === 'MCP_CONFIG_CHANGED' && error.statusCode === 409,
+    );
+
+    const merged = await providerMcpService.writeProviderMcpRawConfig('kiro', {
+      scope: 'user',
+      mode: 'merge',
+      content: JSON.stringify({ pasted: { url: 'https://example.com/p' }, other: { command: 'd' } }),
+    });
+    assert.deepEqual(merged.added.sort(), ['other', 'pasted']);
+    const afterMerge = (await readJson(configPath)).mcpServers as Record<string, unknown>;
+    assert.deepEqual(Object.keys(afterMerge).sort(), ['only', 'other', 'pasted']);
+
+    await assert.rejects(
+      providerMcpService.writeProviderMcpRawConfig('kiro', { scope: 'user', content: '{ nope' }),
+      (error: unknown) => error instanceof AppError && error.code === 'MCP_CONFIG_INVALID',
+    );
+    await assert.rejects(
+      providerMcpService.writeProviderMcpRawConfig('kiro', {
+        scope: 'user',
+        content: '{"mcpServers":{"bad":{"note":"no command or url"}}}',
+      }),
+      (error: unknown) => error instanceof AppError && error.code === 'MCP_CONFIG_INVALID' && /bad/.test(error.message),
+    );
+  } finally {
+    restoreHomeDir();
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+/**
+ * This test covers raw config for the format-specific providers: Codex TOML, OpenCode JSONC,
+ * and Claude's user scope, which exposes only the `mcpServers` section of `~/.claude.json`.
+ */
+test('providerMcpService handles raw config for codex, opencode and claude user scope', { concurrency: false }, async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-mcp-raw-mixed-'));
+  const restoreHomeDir = patchHomeDir(tempRoot);
+  try {
+    const toml = '# my servers\n[mcp_servers.alpha]\ncommand = "node"\n';
+    await providerMcpService.writeProviderMcpRawConfig('codex', { scope: 'user', content: toml });
+    const codexRead = await providerMcpService.readProviderMcpRawConfig('codex', { scope: 'user' });
+    assert.equal(codexRead.content, toml);
+    assert.equal(codexRead.format, 'toml');
+    await assert.rejects(
+      providerMcpService.writeProviderMcpRawConfig('codex', { scope: 'user', content: '[mcp_servers.x' }),
+      (error: unknown) => error instanceof AppError && error.code === 'MCP_CONFIG_INVALID',
+    );
+    await providerMcpService.writeProviderMcpRawConfig('codex', {
+      scope: 'user',
+      mode: 'merge',
+      content: '[mcp_servers.beta]\nurl = "https://example.com/m"\n',
+    });
+    const codexToml = TOML.parse(await fs.readFile(path.join(tempRoot, '.codex', 'config.toml'), 'utf8')) as any;
+    assert.deepEqual(Object.keys(codexToml.mcp_servers).sort(), ['alpha', 'beta']);
+
+    const jsonc = '{\n  // comment\n  "mcp": { "oc": { "type": "remote", "url": "https://example.com/m", },\n  },\n}\n';
+    await providerMcpService.writeProviderMcpRawConfig('opencode', { scope: 'user', content: jsonc });
+    assert.equal((await providerMcpService.readProviderMcpRawConfig('opencode', { scope: 'user' })).content, jsonc);
+
+    const claudePath = path.join(tempRoot, '.claude.json');
+    await fs.writeFile(claudePath, JSON.stringify({ userID: 'abc', mcpServers: { old: { type: 'stdio', command: 'x' } } }), 'utf8');
+    const claudeRead = await providerMcpService.readProviderMcpRawConfig('claude', { scope: 'user' });
+    assert.equal(claudeRead.partial, true);
+    assert.deepEqual(JSON.parse(claudeRead.content), { mcpServers: { old: { type: 'stdio', command: 'x' } } });
+    await providerMcpService.writeProviderMcpRawConfig('claude', {
+      scope: 'user',
+      content: JSON.stringify({ mcpServers: { next: { type: 'http', url: 'https://example.com/m' } } }),
+      expectedHash: claudeRead.hash,
+    });
+    const claudeAfter = await readJson(claudePath);
+    assert.equal(claudeAfter.userID, 'abc');
+    assert.deepEqual(Object.keys(claudeAfter.mcpServers as object), ['next']);
+  } finally {
+    restoreHomeDir();
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});

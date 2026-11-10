@@ -40,6 +40,17 @@ export class CodexMcpProvider extends McpProvider {
     'url', 'bearer_token_env_var', 'http_headers', 'env_http_headers',
   ] as const;
 
+  protected readonly rawServersKey = 'mcp_servers';
+
+  protected async resolveRawConfigFile(scope: McpScope, workspacePath: string) {
+    return {
+      filePath: scope === 'user'
+        ? path.join(os.homedir(), '.codex', 'config.toml')
+        : path.join(workspacePath, '.codex', 'config.toml'),
+      format: 'toml' as const,
+    };
+  }
+
   // Codex skips a server whose table has `enabled = false` but keeps its definition.
   protected readonly supportsEnableToggle = true;
 

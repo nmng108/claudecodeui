@@ -52,6 +52,11 @@ const readKiroMcpConfig = async (filePath: string): Promise<Record<string, unkno
 
 export class KiroMcpProvider extends McpProvider {
   protected readonly managedConfigKeys = ['command', 'args', 'env', 'url', 'headers'] as const;
+  protected readonly rawServersKey = 'mcpServers';
+
+  protected async resolveRawConfigFile(scope: McpScope, workspacePath: string) {
+    return { filePath: getKiroMcpConfigPath(scope, workspacePath), format: 'json' as const };
+  }
 
   // Kiro stores the switch as `disabled: true`; `autoApprove` and friends are never touched.
   protected readonly supportsEnableToggle = true;

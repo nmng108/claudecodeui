@@ -6,6 +6,7 @@ import { McpProvider } from '@/modules/providers/shared/mcp/mcp.provider.js';
 import type { McpScope, ProviderMcpServer, UpsertProviderMcpServerInput } from '@/shared/types.js';
 import {
   AppError,
+  parseJsoncText,
   readObjectRecord,
   readOptionalString,
   readStringArray,
@@ -26,69 +27,10 @@ const fileExists = async (filePath: string): Promise<boolean> => {
   }
 };
 
-/**
- * Removes JSONC comments without touching comment-like text inside strings.
- */
-const stripJsonComments = (content: string): string => {
-  let output = '';
-  let inString = false;
-  let quote = '';
-  let escaped = false;
-
-  for (let index = 0; index < content.length; index += 1) {
-    const char = content[index];
-    const next = content[index + 1];
-
-    if (inString) {
-      output += char;
-      if (escaped) {
-        escaped = false;
-      } else if (char === '\\') {
-        escaped = true;
-      } else if (char === quote) {
-        inString = false;
-        quote = '';
-      }
-      continue;
-    }
-
-    if (char === '"' || char === '\'') {
-      inString = true;
-      quote = char;
-      output += char;
-      continue;
-    }
-
-    if (char === '/' && next === '/') {
-      while (index < content.length && content[index] !== '\n') {
-        index += 1;
-      }
-      output += '\n';
-      continue;
-    }
-
-    if (char === '/' && next === '*') {
-      index += 2;
-      while (index < content.length && !(content[index] === '*' && content[index + 1] === '/')) {
-        index += 1;
-      }
-      index += 1;
-      continue;
-    }
-
-    output += char;
-  }
-
-  return output;
-};
-
-const stripTrailingCommas = (content: string): string =>
-  content.replace(/,\s*([}\]])/g, '$1');
-
 const readOpenCodeConfig = async (filePath: string): Promise<Record<string, unknown>> => {
   try {
     const content = await readFile(filePath, 'utf8');
-    const parsed = JSON.parse(stripTrailingCommas(stripJsonComments(content))) as unknown;
+    const parsed = parseJsoncText(content);
     return readObjectRecord(parsed) ?? {};
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
@@ -127,6 +69,13 @@ export class OpenCodeMcpProvider extends McpProvider {
   // `enabled` is deliberately not managed: a new server gets `enabled: true` from
   // buildServerConfig, and an edit keeps whatever the user last chose.
   protected readonly managedConfigKeys = ['type', 'command', 'args', 'env', 'environment', 'url', 'headers'] as const;
+
+  protected readonly rawServersKey = 'mcp';
+
+  protected async resolveRawConfigFile(scope: McpScope, workspacePath: string) {
+    const { filePath } = await resolveOpenCodeConfigPath(scope, workspacePath);
+    return { filePath, format: 'jsonc' as const };
+  }
 
   protected readonly supportsEnableToggle = true;
 

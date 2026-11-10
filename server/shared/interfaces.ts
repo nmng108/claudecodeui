@@ -14,8 +14,11 @@ import type {
   ProviderModelsDefinition,
   ProviderMcpServer,
   ProviderSkillCreateInput,
+  ProviderMcpRawConfig,
+  ProviderMcpRawConfigWriteResult,
   ProviderSkillRemoveInput,
   SetProviderMcpServerEnabledInput,
+  WriteProviderMcpRawConfigInput,
   ProviderRuntimeContext,
   ProviderRuntimePermissionGateway,
   ProviderRuntimeWriter,
@@ -202,6 +205,14 @@ export interface IProviderMcp {
    * when the server is not in that scope.
    */
   setServerEnabled(input: SetProviderMcpServerEnabledInput): Promise<ProviderMcpServer>;
+  /** Returns the provider's MCP config text for a scope (empty when the file does not exist). */
+  readRawConfig(input: { scope?: McpScope; workspacePath?: string }): Promise<ProviderMcpRawConfig>;
+  /**
+   * Validates and saves (or, with `dryRun`, previews) a raw MCP config edit. Throws
+   * `MCP_CONFIG_INVALID` (422) for unparseable text or malformed servers and
+   * `MCP_CONFIG_CHANGED` (409) when `expectedHash` no longer matches the file.
+   */
+  writeRawConfig(input: WriteProviderMcpRawConfigInput): Promise<ProviderMcpRawConfigWriteResult>;
 }
 
 // ---------------------------

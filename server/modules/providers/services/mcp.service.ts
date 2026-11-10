@@ -2,9 +2,12 @@ import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import type {
   LLMProvider,
   McpScope,
+  ProviderMcpRawConfig,
+  ProviderMcpRawConfigWriteResult,
   ProviderMcpServer,
   SetProviderMcpServerEnabledInput,
   UpsertProviderMcpServerInput,
+  WriteProviderMcpRawConfigInput,
 } from '@/shared/types.js';
 import { AppError } from '@/shared/utils.js';
 
@@ -53,6 +56,26 @@ export const providerMcpService = {
   ): Promise<ProviderMcpServer> {
     const provider = providerRegistry.resolveProvider(providerName);
     return provider.mcp.setServerEnabled(input);
+  },
+
+  /**
+   * Reads one provider's raw MCP config text for a scope.
+   */
+  async readProviderMcpRawConfig(
+    providerName: string,
+    input: { scope?: McpScope; workspacePath?: string },
+  ): Promise<ProviderMcpRawConfig> {
+    return providerRegistry.resolveProvider(providerName).mcp.readRawConfig(input);
+  },
+
+  /**
+   * Validates and saves (or previews) a raw MCP config edit for one provider.
+   */
+  async writeProviderMcpRawConfig(
+    providerName: string,
+    input: WriteProviderMcpRawConfigInput,
+  ): Promise<ProviderMcpRawConfigWriteResult> {
+    return providerRegistry.resolveProvider(providerName).mcp.writeRawConfig(input);
   },
 
   /**

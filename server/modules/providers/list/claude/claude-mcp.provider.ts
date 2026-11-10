@@ -1,8 +1,9 @@
+import { copyFile, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
 import { McpProvider } from '@/modules/providers/shared/mcp/mcp.provider.js';
-import type { McpScope, ProviderMcpServer, UpsertProviderMcpServerInput } from '@/shared/types.js';
+import type { McpRawConfigDocument, McpScope, ProviderMcpServer, UpsertProviderMcpServerInput } from '@/shared/types.js';
 import {
   AppError,
   readJsonConfig,
@@ -15,6 +16,49 @@ import {
 
 export class ClaudeMcpProvider extends McpProvider {
   protected readonly managedConfigKeys = ['type', 'command', 'args', 'env', 'url', 'headers'] as const;
+  protected readonly rawServersKey = 'mcpServers';
+
+  protected async resolveRawConfigFile(scope: McpScope, workspacePath: string) {
+    return {
+      filePath: scope === 'project' ? path.join(workspacePath, '.mcp.json') : path.join(os.homedir(), '.claude.json'),
+      format: 'json' as const,
+    };
+  }
+
+  // `~/.claude.json` also holds Claude's own state, so the editor shows and saves
+  // only the MCP section: `{ "mcpServers": ... }` for user scope and the project's
+  // `mcpServers` for local scope.
+  protected async loadRawDocument(scope: McpScope, workspacePath: string): Promise<McpRawConfigDocument> {
+    if (scope === 'project') {
+      return super.loadRawDocument(scope, workspacePath);
+    }
+
+    const { filePath } = await this.resolveRawConfigFile(scope, workspacePath);
+    const exists = await stat(filePath).then(() => true).catch(() => false);
+    const servers = await this.readScopedServers(scope, workspacePath);
+    const content = Object.keys(servers).length === 0 && !exists
+      ? ''
+      : `${JSON.stringify({ mcpServers: servers }, null, 2)}\n`;
+    return { filePath, format: 'json', content, exists, partial: true };
+  }
+
+  protected async persistRawDocument(
+    scope: McpScope,
+    workspacePath: string,
+    document: McpRawConfigDocument,
+    content: string,
+  ): Promise<void> {
+    if (scope === 'project') {
+      return super.persistRawDocument(scope, workspacePath, document, content);
+    }
+
+    if (document.exists) {
+      await copyFile(document.filePath, `${document.filePath}.cloudcli.bak`);
+    }
+
+    const parsed = readObjectRecord(JSON.parse(content || '{}')) ?? {};
+    await this.writeScopedServers(scope, workspacePath, readObjectRecord(parsed.mcpServers) ?? {});
+  }
 
   constructor() {
     super('claude', ['user', 'local', 'project'], ['stdio', 'http', 'sse']);

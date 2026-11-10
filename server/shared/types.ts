@@ -900,6 +900,70 @@ export type SetProviderMcpServerEnabledInput = {
   enabled: boolean;
 };
 
+/**
+ * Syntax of a provider's MCP config file. `jsonc` allows comments and trailing
+ * commas (OpenCode); `toml` is Codex's `config.toml`.
+ */
+export type McpRawConfigFormat = 'json' | 'jsonc' | 'toml';
+
+/**
+ * One raw MCP config document as loaded for editing: the file it lives in and
+ * its text. Used by the shared MCP provider and by providers (Claude) that
+ * expose only part of a larger shared file; `partial` marks that case.
+ */
+export type McpRawConfigDocument = {
+  filePath: string;
+  format: McpRawConfigFormat;
+  content: string;
+  exists: boolean;
+  partial: boolean;
+};
+
+/**
+ * The raw text of one provider MCP config for a scope, as shown in the raw
+ * editor. `hash` identifies the text that was read; send it back as
+ * `expectedHash` on write to refuse overwriting a file that changed since.
+ * `partial` is true when `content` is only the MCP section of a larger shared
+ * file (Claude's `~/.claude.json`), so saving cannot touch the rest of it.
+ */
+export type ProviderMcpRawConfig = {
+  provider: LLMProvider;
+  scope: McpScope;
+  filePath: string;
+  format: McpRawConfigFormat;
+  content: string;
+  exists: boolean;
+  hash: string;
+  partial: boolean;
+};
+
+/**
+ * Input for saving or previewing a raw MCP config edit. `replace` stores
+ * `content` as the whole document (exact text, comments kept); `merge` accepts
+ * either a full document or a bare name-to-server map and upserts those servers
+ * into the existing config, rewriting the file without comments.
+ */
+export type WriteProviderMcpRawConfigInput = {
+  scope?: McpScope;
+  workspacePath?: string;
+  content: string;
+  mode?: 'replace' | 'merge';
+  expectedHash?: string;
+  /** When true nothing is written; the result shows what would change. */
+  dryRun?: boolean;
+};
+
+/**
+ * Result of a raw config save or preview: the resulting state plus which server
+ * names would be (or were) added, changed or removed.
+ */
+export type ProviderMcpRawConfigWriteResult = ProviderMcpRawConfig & {
+  added: string[];
+  changed: string[];
+  removed: string[];
+  written: boolean;
+};
+
 // ---------------------------
 //----------------- PROVIDER AUTH TYPES ------------
 /**
