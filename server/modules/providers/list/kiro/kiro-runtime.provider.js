@@ -72,18 +72,27 @@ export function resolveKiroEffort(modelId, effort, catalog) {
 }
 
 /**
+ * Kiro labels every permission request with the capability it touches in
+ * `_meta.kiro.consent.capability`: `fs_read`, `fs_write`, `shell`, `web_fetch`,
+ * `web_search`, `mcp` and so on (checked against kiro-cli 2.37). These are the
+ * two a file-changes mode may answer on its own.
+ */
+const KIRO_FILE_CAPABILITIES = new Set(['fs_read', 'fs_write']);
+
+/**
  * Whether a permission request is answered without asking the user, for the
  * mode chosen in the composer:
- * - bypassPermissions: everything ("Allow all").
- * - acceptEdits: reads and edits, as Kiro labels them (`consent.capability`
- *   `read` / `write`); shell and web access still ask.
- * - default and plan: always ask.
+ * - bypassPermissions: everything.
+ * - acceptEdits: file reads and edits, like Kiro's own "Accept file changes"
+ *   mode; shell, web, MCP and unlabelled requests still ask.
+ * - default and plan: always ask. (Kiro's own policy already lets workspace
+ *   reads and read-only commands through, so those never reach this point.)
  */
 export function shouldAutoApproveKiroPermission(permissionMode, capability) {
   if (permissionMode === 'bypassPermissions') {
     return true;
   }
-  return permissionMode === 'acceptEdits' && (capability === 'read' || capability === 'write');
+  return permissionMode === 'acceptEdits' && KIRO_FILE_CAPABILITIES.has(capability);
 }
 /**
  * Runs one Kiro ACP turn: connects (or resumes), sends the prompt, streams

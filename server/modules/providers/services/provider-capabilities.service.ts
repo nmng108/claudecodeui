@@ -120,8 +120,10 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
   },
   kiro: {
     provider: 'kiro',
-    // The ACP runtime maps these onto Kiro's own permission options: bypassPermissions
-    // auto-approves, the others bridge each request to the UI.
+    // The ACP runtime answers permission requests by the capability Kiro labels
+    // them with: bypassPermissions approves all, acceptEdits approves file reads
+    // and edits (fs_read, fs_write), and default and plan ask for everything.
+    // Plan also switches Kiro's own plan agent mode.
     permissionModes: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
     defaultPermissionMode: 'default',
     supportsImages: false,

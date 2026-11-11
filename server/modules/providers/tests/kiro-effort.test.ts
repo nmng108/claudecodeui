@@ -41,18 +41,22 @@ test('with no explicit choice Kiro starts at medium, as kiro-ui does', () => {
 
 test('permission modes map onto what Kiro asks about', () => {
   // Always ask: default and plan never auto-approve.
-  for (const capability of ['read', 'write', 'shell', 'web', undefined]) {
+  for (const capability of ['fs_read', 'fs_write', 'shell', 'web_fetch', 'mcp', undefined]) {
     assert.equal(shouldAutoApproveKiroPermission('default', capability), false, `default/${capability}`);
     assert.equal(shouldAutoApproveKiroPermission('plan', capability), false, `plan/${capability}`);
   }
   // Allow all.
-  for (const capability of ['read', 'write', 'shell', 'web', undefined]) {
+  for (const capability of ['fs_read', 'fs_write', 'shell', 'web_fetch', 'mcp', undefined]) {
     assert.equal(shouldAutoApproveKiroPermission('bypassPermissions', capability), true, `bypass/${capability}`);
   }
-  // Accept edits: reads and edits, but never shell, web or an unknown capability.
-  assert.equal(shouldAutoApproveKiroPermission('acceptEdits', 'read'), true);
-  assert.equal(shouldAutoApproveKiroPermission('acceptEdits', 'write'), true);
+  // Accept edits: file reads and edits, but never shell, web, MCP or an unknown capability.
+  assert.equal(shouldAutoApproveKiroPermission('acceptEdits', 'fs_read'), true);
+  assert.equal(shouldAutoApproveKiroPermission('acceptEdits', 'fs_write'), true);
   assert.equal(shouldAutoApproveKiroPermission('acceptEdits', 'shell'), false);
-  assert.equal(shouldAutoApproveKiroPermission('acceptEdits', 'web'), false);
+  assert.equal(shouldAutoApproveKiroPermission('acceptEdits', 'web_fetch'), false);
+  assert.equal(shouldAutoApproveKiroPermission('acceptEdits', 'mcp'), false);
+  // Labels Kiro does not use must not match by accident.
+  assert.equal(shouldAutoApproveKiroPermission('acceptEdits', 'read'), false);
+  assert.equal(shouldAutoApproveKiroPermission('acceptEdits', 'write'), false);
   assert.equal(shouldAutoApproveKiroPermission('acceptEdits', undefined), false);
 });

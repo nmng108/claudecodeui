@@ -49,7 +49,8 @@ export type KiroPermissionRequestEvent = {
   kind: string | undefined;
   options: KiroPermissionOption[];
   rawInput: unknown;
-  /** v3 _meta.kiro.consent.capability: ead, write, shell, web, ... when the agent says. */
+  /** v3 _meta.kiro.consent.capability: 
+ead, write, shell, web, ... when the agent says. */
   capability?: string;
 };
 
@@ -116,7 +117,8 @@ export type KiroAcpClientOptions = {
   commandArgs?: string[];
   initTimeoutMs?: number;
   events?: KiroAcpClientEvents;
-  /** Defaults to esolveKiroEngine(). */
+  /** Defaults to 
+esolveKiroEngine(). */
   engine?: KiroEngine;
 };
 

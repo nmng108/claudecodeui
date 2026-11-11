@@ -11,7 +11,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-import type { PermissionMode } from '@/shared/types';
+import type { LLMProvider, PermissionMode } from '@/shared/types';
 import { useComposerMenuAnchor } from '@/modules/chat/hooks/useComposerMenuAnchor';
 import { usePermissionNameFit } from '@/modules/chat/hooks/usePermissionNameFit';
 import {
@@ -84,6 +84,8 @@ type ComposerPermissionMenuProps = {
   permissionModes: PermissionMode[];
   onSelectPermissionMode: (mode: PermissionMode) => void;
   providerLabel: string;
+  /** Selects provider-specific mode descriptions where a provider's modes differ from the shared wording. */
+  provider: LLMProvider;
 };
 
 /**
@@ -95,11 +97,18 @@ function ComposerPermissionMenu({
   permissionModes,
   onSelectPermissionMode,
   providerLabel,
+  provider,
 }: ComposerPermissionMenuProps) {
   const { t } = useTranslation('chat');
   const [isOpen, setIsOpen] = useState(false);
   const close = useCallback(() => setIsOpen(false), []);
   const { triggerRef, menuRef, anchor, updateAnchor } = useComposerMenuAnchor(isOpen, close, 22 * 16);
+  // The shared descriptions are written for Claude and Codex; a provider whose
+  // modes behave differently ships its own under `codex.providerDescriptions`.
+  const modeDescription = (mode: PermissionMode) =>
+    t(`codex.providerDescriptions.${provider}.${mode}`, {
+      defaultValue: t(`codex.descriptions.${mode}`, { defaultValue: '' }),
+    });
   const modeLabel = (mode: PermissionMode) =>
     t(`codex.modes.${mode}`, { defaultValue: getAppearance(mode).label || mode });
   const activeModeLabel = modeLabel(permissionMode);
@@ -161,7 +170,7 @@ function ComposerPermissionMenu({
                 key={mode}
                 icon={<ModeIcon className="h-4 w-4" />}
                 label={modeLabel(mode)}
-                description={t(`codex.descriptions.${mode}`, { defaultValue: '' }) || undefined}
+                description={modeDescription(mode) || undefined}
                 isSelected={mode === permissionMode}
                 onSelect={() => {
                   onSelectPermissionMode(mode);

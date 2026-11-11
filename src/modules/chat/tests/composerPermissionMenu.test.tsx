@@ -24,6 +24,7 @@ test('the composer names the mode the next message runs in', () => {
       permissionModes={[...MODES]}
       onSelectPermissionMode={() => {}}
       providerLabel="Claude"
+      provider="claude"
     />,
   );
 
@@ -37,6 +38,7 @@ test('a screen reader hears the mode the button shows', () => {
       permissionModes={[...MODES]}
       onSelectPermissionMode={() => {}}
       providerLabel="Claude"
+      provider="claude"
     />,
   );
 
@@ -50,6 +52,7 @@ test('the default mode is named too', () => {
       permissionModes={[...MODES]}
       onSelectPermissionMode={() => {}}
       providerLabel="Claude"
+      provider="claude"
     />,
   );
 
@@ -63,6 +66,7 @@ const renderMenu = (permissionMode: PermissionMode, permissionModes: PermissionM
       permissionModes={permissionModes}
       onSelectPermissionMode={() => {}}
       providerLabel="Claude"
+      provider="claude"
     />,
   );
 
@@ -158,6 +162,7 @@ const renderInFooter = (permissionMode: PermissionMode) =>
           permissionModes={[...MODES]}
           onSelectPermissionMode={() => {}}
           providerLabel="Claude"
+      provider="claude"
         />
       </div>
     </PromptInputFooter>,
@@ -263,4 +268,21 @@ test('the menu ends by saying Tab in the message box switches modes', () => {
   fireEvent.click(getByRole('button'));
 
   assert.equal(getByRole('menu').lastElementChild?.textContent, 'Press Tab in the message box to switch modes');
+});
+
+test('Kiro describes its modes in its own words, not the shared Claude and Codex ones', () => {
+  const { getByRole, getAllByRole } = render(
+    <ComposerPermissionMenu
+      permissionMode="default"
+      permissionModes={['default', 'acceptEdits', 'bypassPermissions', 'plan']}
+      onSelectPermissionMode={() => {}}
+      providerLabel="Kiro"
+      provider="kiro"
+    />,
+  );
+
+  fireEvent.click(getByRole('button'));
+  const rows = getAllByRole('menuitemradio').map((row) => row.textContent ?? '');
+  assert.match(rows[1], /Shell commands, web access and MCP tools still ask/);
+  assert.ok(rows.every((row) => !/sandboxed execution/.test(row)), 'the shared Codex wording is not shown for Kiro');
 });

@@ -124,6 +124,14 @@
       "bypassPermissions": "Full system access with no restrictions. All commands run automatically with full disk and network access. Use with caution.",
       "plan": "Planning mode - no commands are executed"
     },
+    "providerDescriptions": {
+      "kiro": {
+        "default": "Kiro asks before anything its own rules do not already allow (workspace reads and read-only commands never ask).",
+        "acceptEdits": "Reads and edits files without asking. Shell commands, web access and MCP tools still ask.",
+        "bypassPermissions": "Approves every request without asking. Use with caution.",
+        "plan": "Kiro's plan agent: it researches and proposes a plan, and changes nothing."
+      }
+    },
     "technicalDetails": "Technical details"
   },
   "voice": {

@@ -266,7 +266,7 @@ const connection = new AgentSideConnection((_client) => ({
           { optionId: 'reject_once', name: 'Reject', kind: 'reject_once' },
         ],
         // v3 labels each request with what it touches; the app decides auto-approval from it.
-        _meta: { kiro: { consent: { capability: scenario === 'permission-read' ? 'read' : 'shell' } } },
+        _meta: { kiro: { consent: { capability: scenario === 'permission-read' ? 'fs_read' : 'shell' } } },
       } as never);
 
       const selected = (outcome as { outcome: { outcome: string; optionId?: string } }).outcome;
