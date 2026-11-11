@@ -7,6 +7,12 @@ import { notifyRunFailed, notifyRunStopped } from '@/modules/notifications/index
 import { createCompleteMessage, createNormalizedMessage, generateMessageId } from '@/shared/utils.js';
 import { resolveKiroApiKey } from '@/modules/providers/list/kiro/kiro-api-key.store.js';
 import { KiroAcpClient } from '@/modules/providers/list/kiro/kiro-acp.client.js';
+import {
+  buildKiroRememberChoices,
+  describeKiroAskedResource,
+  KIRO_REMEMBER_SCOPES,
+  resolveKiroRememberSelection,
+} from '@/modules/providers/list/kiro/kiro-permission-choices.js';
 import { buildKiroToolResult } from '@/modules/providers/list/kiro/kiro-tool-output.js';
 import { parseKiroModelCatalog, seedKiroModelCatalog } from '@/modules/providers/list/kiro/kiro-models.provider.js';
 import { findKiroSessionDir, getKiroMessagesPath, readKiroSessionJson } from '@/modules/providers/list/kiro/kiro-paths.js';
@@ -329,11 +335,24 @@ async function runKiro(command, options = {}, ws, context) {
             return allowOption ? { optionId: allowOption.optionId } : { cancelled: true };
           }
 
+          // What the UI shows beyond the title, and the rules it may offer to save.
+          // Kiro's permission request carries no tool input, so the thing being
+          // asked about (a command, a path) is shown in its place.
+          const askedResource = describeKiroAskedResource(event.consent);
+          const rememberChoices = buildKiroRememberChoices(event.consent, event.options);
+          const promptDetails = {
+            capability: event.capability,
+            askedResource,
+            rememberChoices,
+            rememberScopes: rememberChoices.length > 0 ? KIRO_REMEMBER_SCOPES : [],
+          };
+
           ws.send(createNormalizedMessage({
             kind: 'permission_request',
             requestId: event.requestId,
             toolName: event.title,
-            input: event.rawInput,
+            input: event.rawInput ?? (askedResource ? { capability: event.capability, resource: askedResource } : undefined),
+            ...promptDetails,
             sessionId: activeSessionId,
             provider: 'kiro',
           }));
@@ -354,9 +373,18 @@ async function runKiro(command, options = {}, ws, context) {
                 resolve(rejectOption ? { optionId: rejectOption.optionId } : { cancelled: true });
                 return;
               }
+              // "Always allow": only a choice this request offered is honoured, so
+              // the client cannot make Kiro save a rule of its own wording. A
+              // selection that does not check out allows just this one call.
+              const remembered = resolveKiroRememberSelection(rememberChoices, decision.rememberChoice, event.options);
+              if (remembered) {
+                resolve(remembered);
+                return;
+              }
               const optionId = typeof decision.optionId === 'string'
                 ? decision.optionId
-                : event.options.find((option) => option.kind === 'allow_once' || option.kind === 'allow_always')?.optionId;
+                : event.options.find((option) => option.kind === 'allow_once')?.optionId
+                  ?? event.options.find((option) => option.kind === 'allow_always')?.optionId;
               if (!optionId) {
                 resolve({ cancelled: true });
                 return;
@@ -366,6 +394,7 @@ async function runKiro(command, options = {}, ws, context) {
             resolver._sessionId = activeSessionId;
             resolver._toolName = event.title;
             resolver._input = event.rawInput;
+            resolver._details = promptDetails;
             resolver._receivedAt = new Date();
             resolver._options = event.options;
             pendingKiroApprovals.set(event.requestId, resolver);
@@ -584,6 +613,7 @@ function getPendingKiroApprovalsForSession(sessionId) {
         requestId,
         toolName: resolver._toolName,
         input: resolver._input,
+        ...resolver._details,
         receivedAt: resolver._receivedAt,
       });
     }

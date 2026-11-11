@@ -624,6 +624,8 @@ export type ProviderPermissionDecision = {
   updatedInput?: unknown;
   message?: string;
   rememberEntry?: unknown;
+  /** Kiro: one of the rule choices the request offered, and where to keep the rule (`session`, `workspace` or `user`). */
+  rememberChoice?: { choiceId: string; scope: string };
 };
 
 export type ProviderRuntimePermissionGateway = {

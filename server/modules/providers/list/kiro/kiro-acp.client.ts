@@ -18,6 +18,11 @@ import { ClientSideConnection, ndJsonStream, PROTOCOL_VERSION } from '@agentclie
 import crossSpawn from 'cross-spawn';
 
 import { resolveKiroApiKey } from '@/modules/providers/list/kiro/kiro-api-key.store.js';
+import {
+  readKiroConsent,
+  type KiroConsent,
+  type KiroConsentReply,
+} from '@/modules/providers/list/kiro/kiro-permission-choices.js';
 import { AppError } from '@/shared/utils.js';
 
 /** Override for tests and non-standard installs; documented in docs/kiro/design.md. */
@@ -49,10 +54,17 @@ export type KiroPermissionRequestEvent = {
   kind: string | undefined;
   options: KiroPermissionOption[];
   rawInput: unknown;
-  /** v3 _meta.kiro.consent.capability: 
-ead, write, shell, web, ... when the agent says. */
+  /** v3 `_meta.kiro.consent.capability`: `fs_read`, `fs_write`, `shell`, `web_fetch`, `mcp`, ... when the agent says. */
   capability?: string;
+  /** The full v3 `_meta.kiro.consent`, which tells what is asked and what rules could be saved. */
+  consent?: KiroConsent;
 };
+
+/**
+ * The answer to a permission request. `consent` accompanies an `always-accept`
+ * option and tells Kiro which rule to save and where.
+ */
+export type KiroPermissionDecision = { optionId: string; consent?: KiroConsentReply } | { cancelled: true };
 
 export type KiroSessionUpdateEvent =
   | { type: 'agent_message_chunk'; text: string; isThought?: boolean }
@@ -96,7 +108,7 @@ export type KiroAcpClientEvents = {
   /** Resolves the user's decision; `null`/`undefined` is treated as cancelled. */
   onPermissionRequest?(
     event: KiroPermissionRequestEvent,
-  ): Promise<{ optionId: string } | { cancelled: true } | null | undefined>;
+  ): Promise<KiroPermissionDecision | null | undefined>;
   /** The child exited or the pipe closed without the client tearing it down itself. */
   onCrash?(info: { code: number | null; signal: string | null; stderrTail: string }): void;
 };
@@ -212,12 +224,11 @@ function toSessionUpdateEvent(update: Record<string, unknown>): KiroSessionUpdat
   }
 }
 
-/** The capability Kiro attaches to a permission request (`_meta.kiro.consent.capability`), if any. */
-function readConsentCapability(params: Record<string, unknown>): string | undefined {
-  const meta = params._meta as { kiro?: { consent?: { capability?: unknown } } } | undefined;
-  const capability = meta?.kiro?.consent?.capability;
-  return typeof capability === 'string' && capability ? capability : undefined;
-}
+/** The ACP reply to `session/request_permission`. */
+type KiroPermissionOutcome = {
+  outcome: { outcome: 'cancelled' } | { outcome: 'selected'; optionId: string };
+  _meta?: { kiro: { consent: KiroConsentReply } };
+};
 
 /** Ext notification methods this task's client actively interprets; everything else is just forwarded/logged. */
 const KNOWN_EXT_NOTIFICATIONS = new Set([
@@ -253,10 +264,7 @@ export class KiroAcpClient {
   /** While true, session updates are dropped (used for the internal `/effort` turn). */
   private muted = false;
   private spawnFailure: AppError | null = null;
-  private readonly pendingPermissions = new Map<
-    string,
-    (decision: { optionId: string } | { cancelled: true }) => void
-  >();
+  private readonly pendingPermissions = new Map<string, (decision: KiroPermissionDecision) => void>();
 
   constructor(options: KiroAcpClientOptions) {
     this.cwd = options.cwd;
@@ -556,7 +564,7 @@ export class KiroAcpClient {
   }
 
   /** Resolves a pending `session/request_permission` call by its request id. */
-  resolvePermission(requestId: string, decision: { optionId: string } | { cancelled: true }): void {
+  resolvePermission(requestId: string, decision: KiroPermissionDecision): void {
     const resolver = this.pendingPermissions.get(requestId);
     if (!resolver) {
       return;
@@ -612,7 +620,7 @@ export class KiroAcpClient {
 
   private async handlePermissionRequest(
     params: Record<string, unknown>,
-  ): Promise<{ outcome: { outcome: 'cancelled' } | { outcome: 'selected'; optionId: string } }> {
+  ): Promise<KiroPermissionOutcome> {
     const toolCall = (params.toolCall as Record<string, unknown>) || {};
     const requestId = (toolCall.toolCallId as string) || '';
     const options = ((params.options as Array<Record<string, unknown>>) || []).map((option) => ({
@@ -626,7 +634,7 @@ export class KiroAcpClient {
       return { outcome: { outcome: 'cancelled' } };
     }
 
-    const decisionPromise = new Promise<{ optionId: string } | { cancelled: true }>((resolve) => {
+    const decisionPromise = new Promise<KiroPermissionDecision>((resolve) => {
       this.pendingPermissions.set(requestId, resolve);
     });
 
@@ -635,6 +643,7 @@ export class KiroAcpClient {
     // auto-approve policy, trust rule). Whichever settles first wins.
     // Racing against decisionPromise lets cancel()/close() release a bridge
     // that is still waiting on the UI.
+    const consent = readKiroConsent(params);
     const bridgePromise = Promise.resolve(this.events.onPermissionRequest({
       requestId,
       toolCallId: requestId,
@@ -642,7 +651,8 @@ export class KiroAcpClient {
       kind: toolCall.kind as string | undefined,
       options,
       rawInput: toolCall.rawInput,
-      capability: readConsentCapability(params),
+      capability: consent?.capability,
+      consent,
     })).then(
       (result) => result ?? decisionPromise,
       () => ({ cancelled: true }) as const,
@@ -653,13 +663,15 @@ export class KiroAcpClient {
     return this.toPermissionOutcome(decision);
   }
 
-  private toPermissionOutcome(
-    decision: { optionId: string } | { cancelled: true } | null | undefined,
-  ): { outcome: { outcome: 'cancelled' } | { outcome: 'selected'; optionId: string } } {
+  private toPermissionOutcome(decision: KiroPermissionDecision | null | undefined): KiroPermissionOutcome {
     if (!decision || 'cancelled' in decision) {
       return { outcome: { outcome: 'cancelled' } };
     }
-    return { outcome: { outcome: 'selected', optionId: decision.optionId } };
+    return {
+      outcome: { outcome: 'selected', optionId: decision.optionId },
+      // Kiro reads the rule to save from the reply's own `_meta`.
+      ...(decision.consent ? { _meta: { kiro: { consent: decision.consent } } } : {}),
+    };
   }
 
   private rejectAllPendingPermissions(): void {

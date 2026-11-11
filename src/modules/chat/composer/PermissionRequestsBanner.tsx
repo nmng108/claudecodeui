@@ -2,7 +2,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { ShieldAlertIcon } from 'lucide-react';
 
-import type { PendingPermissionRequest } from '@/shared/types';
+import type { PendingPermissionRequest, PermissionDecision } from '@/shared/types';
 import { buildClaudeToolPermissionEntry, formatToolInputForDisplay } from '@/modules/chat/utils/chatPermissions';
 import { getClaudeSettings } from '@/modules/chat/utils/chatStorage';
 import { getPermissionPanel, registerPermissionPanel } from '@/modules/chat/tools/configs/permissionPanelRegistry';
@@ -14,6 +14,7 @@ import {
   ConfirmationRequest,
   ConfirmationTitle,
 } from '@/modules/chat/composer/Confirmation';
+import RememberRulePermission from '@/modules/chat/composer/RememberRulePermission';
 
 registerPermissionPanel('AskUserQuestion', AskUserQuestionPanel);
 
@@ -21,7 +22,7 @@ type PermissionRequestsBannerProps = {
   pendingPermissionRequests: PendingPermissionRequest[];
   handlePermissionDecision: (
     requestIds: string | string[],
-    decision: { allow?: boolean; message?: string; rememberEntry?: string | null; updatedInput?: unknown },
+    decision: PermissionDecision,
   ) => void;
   handleGrantToolPermission: (suggestion: { entry: string; toolName: string }) => { success: boolean };
 };
@@ -52,6 +53,19 @@ export default function PermissionRequestsBanner({
         if (CustomPanel) {
           return (
             <CustomPanel
+              key={request.requestId}
+              request={request}
+              onDecision={handlePermissionDecision}
+            />
+          );
+        }
+
+        // Kiro labels its requests with a capability and offers its own patterns
+        // and scopes (none for an ask it will not remember); the Claude-style
+        // "Allow & remember" below saves a Claude rule and does not apply.
+        if (request.capability) {
+          return (
+            <RememberRulePermission
               key={request.requestId}
               request={request}
               onDecision={handlePermissionDecision}

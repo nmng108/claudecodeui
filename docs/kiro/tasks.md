@@ -232,12 +232,12 @@ Replaces the T3 stubs `kiro-models.provider.ts`, `kiro-sessions.provider.ts`, `k
 
 **Reasoning effort (default medium).** The composer's model menu already has a "Reasoning" list, filled from the model catalog. What was missing was the starting value: Kiro now starts at `medium` (as kiro-ui does) instead of the model's own default, which is often `high` and costs more credits. The UI baseline is `medium` for Kiro (`getBaselineEffort`), and the runtime sends `medium` when no level was chosen and the model offers it (`resolveKiroEffort`). A model without `medium` keeps its own default. "Default" stays in the menu and now also means medium for Kiro.
 
-**Permission modes: evaluated, the existing four fit, so no new list.** kiro-ui offers Always ask, Allow read and Allow all. The composer's existing modes map onto Kiro like this, using the `_meta.kiro.consent.capability` label (`read`, `write`, `shell`, `web`) that v3 puts on every permission request:
+**Permission modes: evaluated, the existing four fit, so no new list.** kiro-ui offers Always ask, Allow read and Allow all. The composer's existing modes map onto Kiro like this, using the `_meta.kiro.consent.capability` label (`fs_read`, `fs_write`, `shell`, `web_fetch`, `mcp`, ...) that v3 puts on every permission request:
 
 | Composer mode | Kiro behaviour |
 |---|---|
 | Default Mode | Always ask (kiro-ui "Always ask"). Starting mode. |
-| Accept Edits | Answers `read` and `write` requests itself; `shell`, `web` and unlabelled requests still ask. This covers kiro-ui's "Allow read" and adds edits. |
+| Accept Edits | Answers `fs_read` and `fs_write` requests itself; `shell`, `web_fetch`, `mcp` and unlabelled requests still ask. This covers kiro-ui's "Allow read" and adds edits. |
 | Bypass Permissions | Allows everything (kiro-ui "Allow all"). |
 | Plan Mode | Switches Kiro's own `plan` agent mode (`session/set_config_option` `mode`, verified live) and back to `vibe` afterwards. Nothing is changed. |
 
@@ -254,3 +254,15 @@ Kiro's own "Allow read" alone (reads but not edits) has no separate entry; Accep
 **Tests.** Server: effort default, permission-mode mapping, command list and handlers, shell launch. Client: updated expectations. End to end: effort starts at medium and `/effort` changes it, the slash menu shows the Kiro set, `/plan`, Accept Edits asks only for shell, Bypass allows all, `/context` and `/compact` on a stored session, and the Shell tab launching `kiro-cli --v3` with the key.
 
 **Found while testing.** Pressing Enter in the slash menu before it has re-filtered runs the first listed command, and opening a session of another provider shows the previous provider's command list for a moment. Both are existing behaviour; the e2e tests wait for the menu to settle.
+
+### Remembering permissions (2026-11-11)
+
+"Always allow" used to do nothing useful: the UI built a Claude rule, the runtime ignored it, and Kiro, given a bare `always-accept`, saved only the exact first sub-command. The reply to `session/request_permission` can carry `_meta.kiro.consent = { scope, resource }`, which Kiro uses as the rule (checked on kiro-cli 2.37 by saving a rule and running a second command, also from a new process):
+
+- `scope`: `session`, `workspace` (`~/.kiro/workspace-roots/<hash>/permissions.yaml`) or `user` (`~/.kiro/settings/permissions.yaml`).
+- `resource`: the pattern. `*` covers the whole tool (shell, `fs_write` and `fs_read` verified; other capabilities assumed to behave the same). `cat *` covered later `cat ...` commands. `dir/**` covered files below `dir`, not top-level files.
+- A piped command is asked once per sub-command (`consent.triggeringResource`), each with the whole command as title.
+- Kiro offers no `allow_always` for `askType: explicit` asks; nothing is offered then.
+
+`kiro-permission-choices.ts` builds the patterns (exact, subcommand, command, folder, entire tool; no wildcard for `sudo`/`env` wrappers, assignments or shell syntax) and checks the user's selection. The UI sends a choice id and a scope, never a pattern, and the runtime ignores anything it did not offer.
+

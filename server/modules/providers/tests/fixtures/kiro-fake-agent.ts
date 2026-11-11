@@ -292,6 +292,41 @@ const connection = new AgentSideConnection((_client) => ({
       return { stopReason: 'end_turn' };
     }
 
+    if (scenario === 'permission-remember') {
+      // The shape kiro-cli 2.37 sends for one part of a piped command: the whole
+      // command is `resource`, the part being asked about is `triggeringResource`.
+      const outcome = await connection.requestPermission({
+        sessionId,
+        toolCall: { toolCallId: 'tool-1', title: 'cat notes.txt | grep todo', status: 'pending' },
+        options: [
+          { optionId: 'accept', name: 'Allow', kind: 'allow_once' },
+          { optionId: 'always-accept', name: 'Always allow', kind: 'allow_always' },
+          { optionId: 'reject', name: 'Deny', kind: 'reject_once' },
+          { optionId: 'always-reject', name: 'Always deny', kind: 'reject_always' },
+        ],
+        _meta: {
+          kiro: {
+            consent: {
+              capability: 'shell',
+              resource: 'cat notes.txt | grep todo',
+              triggeringResource: 'cat notes.txt',
+              askType: 'implicit',
+            },
+          },
+        },
+      } as never);
+      // Report what the client answered, so the test can see the reply Kiro would get.
+      const reply = outcome as { outcome: { outcome: string; optionId?: string }; _meta?: { kiro?: { consent?: unknown } } };
+      await connection.sessionUpdate({
+        sessionId,
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: JSON.stringify({ optionId: reply.outcome.optionId, consent: reply._meta?.kiro?.consent ?? null }) },
+        },
+      });
+      return { stopReason: 'end_turn' };
+    }
+
     if (scenario === 'thought-chunks') {
       // Real Kiro streams a thought as many tiny chunks. Three thoughts: one broken
       // up by a usage update, one after a tool result, and one that is the last

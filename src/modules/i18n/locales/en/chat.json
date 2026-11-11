@@ -95,7 +95,27 @@
     "addTo": "Adds {{entry}} to Allowed Tools.",
     "retry": "Permission saved. Retry the request to use the tool.",
     "error": "Unable to update permissions. Please try again.",
-    "openSettings": "Open settings"
+    "openSettings": "Open settings",
+    "remember": {
+      "required": "Permission required",
+      "deny": "Deny",
+      "once": "Allow once",
+      "always": "Always allow…",
+      "back": "Back",
+      "save": "Allow & remember",
+      "ruleHeading": "Always allow",
+      "scopeHeading": "Keep this rule for",
+      "exact": "Only this one",
+      "subcommand": "This subcommand with any arguments",
+      "command": "This command with any arguments",
+      "directory": "Anything in this folder",
+      "tool": "Entire tool ({{capability}})",
+      "scope": {
+        "session": "This session",
+        "workspace": "This workspace",
+        "user": "All workspaces"
+      }
+    }
   },
   "todo": {
     "updated": "Todo list has been updated successfully",

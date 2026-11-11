@@ -358,6 +358,10 @@ export function useChatRealtimeHandlers({
                 toolName: (msg.toolName as string) || 'UnknownTool',
                 input: msg.input,
                 context: msg.context,
+                capability: msg.capability as PendingPermissionRequest['capability'],
+                askedResource: msg.askedResource as PendingPermissionRequest['askedResource'],
+                rememberChoices: msg.rememberChoices as PendingPermissionRequest['rememberChoices'],
+                rememberScopes: msg.rememberScopes as PendingPermissionRequest['rememberScopes'],
                 sessionId: sid || null,
                 receivedAt: new Date(),
               }];

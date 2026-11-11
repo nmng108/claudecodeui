@@ -445,7 +445,23 @@ export type PermissionGrantResult = {
   updatedSettings?: ClaudeSettings;
 };
 
-/** A tool-permission request awaiting the user's decision, identified by its requestId and carrying the tool name, input and context needed to render the prompt and reply to the backend. */
+/** One rule a provider offers to remember when a permission request is allowed (for example `cat *`); `kind` says how to word it and `id` is what the reply names. Currently offered by Kiro. */
+export type PermissionRememberChoice = {
+  id: string;
+  kind: 'exact' | 'subcommand' | 'command' | 'directory' | 'tool';
+  pattern: string;
+};
+
+/** The user's answer to a permission request, sent as `chat.permission-response`; `rememberEntry` is the Claude rule to save and `rememberChoice` names one offered `PermissionRememberChoice` plus where to keep it. */
+export type PermissionDecision = {
+  allow?: boolean;
+  message?: string;
+  rememberEntry?: string | null;
+  updatedInput?: unknown;
+  rememberChoice?: { choiceId: string; scope: string };
+};
+
+/** A tool-permission request awaiting the user's decision, identified by its requestId and carrying the tool name, input and context needed to render the prompt and reply to the backend. Providers that can save rules also send what is being asked about, the capability, and the rules and scopes on offer. */
 export type PendingPermissionRequest = {
   requestId: string;
   toolName: string;
@@ -453,6 +469,14 @@ export type PendingPermissionRequest = {
   context?: unknown;
   sessionId?: string | null;
   receivedAt?: Date;
+  /** What kind of action is asked about (`shell`, `fs_write`, ...). */
+  capability?: string;
+  /** The specific command or path being asked about right now. */
+  askedResource?: string;
+  /** Rules the user may have the provider remember, narrowest first; empty or absent when none can be saved. */
+  rememberChoices?: PermissionRememberChoice[];
+  /** Where a remembered rule may be kept (`session`, `workspace`, `user`), narrowest first. */
+  rememberScopes?: string[];
 };
 
 /** One question asked by the AskUserQuestion tool, with its answer options and whether more than one option may be selected. */

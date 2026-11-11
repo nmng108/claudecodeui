@@ -176,6 +176,58 @@ for (const [label, allow, expected] of [['allow', true, 'permission allowed, ran
   });
 }
 
+/** Runs the permission-remember scenario, answers it with `decision`, and returns the request and what Kiro would receive. */
+async function answerRememberRequest(decision: Record<string, unknown>) {
+  return withFakeCli('permission-remember', async ({ dir, messages, ws }) => {
+    const run = kiroRuntime.run('read it', { cwd: dir, sessionId: 'app-remember' }, ws, makeContext());
+    await waitFor(() => messages.some((m) => m.kind === 'permission_request'));
+    const request = messages.find((m) => m.kind === 'permission_request')!;
+    kiroRuntime.permissions!.resolve(request.requestId, decision as never);
+    await run;
+    const reply = JSON.parse(messages.find((m) => m.kind === 'stream_delta')!.content) as {
+      optionId: string;
+      consent: { scope: string; resource: string } | null;
+    };
+    return { request, reply };
+  });
+}
+
+test('Kiro runtime offers rules to remember for the part of a command being asked about', async () => {
+  const { request } = await answerRememberRequest({ allow: true });
+
+  assert.equal(request.askedResource, 'cat notes.txt', 'the sub-command, not the whole pipeline');
+  assert.equal(request.capability, 'shell');
+  assert.deepEqual(request.rememberScopes, ['session', 'workspace', 'user']);
+  assert.deepEqual(
+    request.rememberChoices.map((choice: { id: string; pattern: string }) => [choice.id, choice.pattern]),
+    [['exact', 'cat notes.txt'], ['command', 'cat *'], ['tool', '*']],
+  );
+});
+
+for (const [choiceId, scope, pattern] of [
+  ['command', 'workspace', 'cat *'],
+  ['tool', 'user', '*'],
+  ['exact', 'session', 'cat notes.txt'],
+] as const) {
+  test(`Kiro runtime saves the ${choiceId} rule at ${scope} scope when the user picks it`, async () => {
+    const { reply } = await answerRememberRequest({ allow: true, rememberChoice: { choiceId, scope } });
+    assert.equal(reply.optionId, 'always-accept');
+    assert.deepEqual(reply.consent, { scope, resource: pattern });
+  });
+}
+
+test('Kiro runtime allows only this call when the selection is not one it offered', async () => {
+  for (const rememberChoice of [
+    { choiceId: 'command', scope: 'everywhere' },
+    { choiceId: 'rm -rf *', scope: 'user' },
+    { choiceId: 'command' },
+  ]) {
+    const { reply } = await answerRememberRequest({ allow: true, rememberChoice });
+    assert.equal(reply.optionId, 'accept', JSON.stringify(rememberChoice));
+    assert.equal(reply.consent, null);
+  }
+});
+
 test('Kiro runtime auto-approves under bypassPermissions', async () => {
   await withFakeCli('permission', async ({ dir, messages, ws }) => {
     await kiroRuntime.run('run it', { cwd: dir, sessionId: 'app-3', permissionMode: 'bypassPermissions' }, ws, makeContext());

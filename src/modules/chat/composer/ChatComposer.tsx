@@ -14,7 +14,7 @@ import { PaperclipIcon, MessageSquareIcon, XIcon, Loader2, ArrowUpIcon, PencilIc
 
 import { useVoiceInput } from '@/modules/chat/hooks/useVoiceInput';
 import { useVoiceAvailable } from '@/modules/chat/hooks/useVoiceAvailable';
-import type { LLMProvider, BackgroundSendChoice, BackgroundSendPrompt, QueuedDraft, ScheduledMessage, SlashCommand,SessionActivity,PendingPermissionRequest,PermissionMode,ProviderModelOption } from '@/shared/types';
+import type { LLMProvider, BackgroundSendChoice, BackgroundSendPrompt, QueuedDraft, ScheduledMessage, SlashCommand,SessionActivity,PendingPermissionRequest,PermissionDecision,PermissionMode,ProviderModelOption } from '@/shared/types';
 import {
   PromptInput,
   PromptInputHeader,
@@ -47,7 +47,7 @@ type ChatComposerProps = {
   pendingPermissionRequests: PendingPermissionRequest[];
   handlePermissionDecision: (
     requestIds: string | string[],
-    decision: { allow?: boolean; message?: string; rememberEntry?: string | null; updatedInput?: unknown },
+    decision: PermissionDecision,
   ) => void;
   handleGrantToolPermission: (suggestion: { entry: string; toolName: string }) => { success: boolean };
   activity: SessionActivity | null;

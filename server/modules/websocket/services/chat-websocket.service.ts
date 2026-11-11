@@ -575,7 +575,16 @@ function handlePermissionResponse(data: AnyRecord, dependencies: ChatWebSocketDe
     updatedInput: data.updatedInput,
     message: typeof data.message === 'string' ? data.message : undefined,
     rememberEntry: data.rememberEntry,
+    rememberChoice: readRememberChoice(data.rememberChoice),
   });
+}
+
+/** Accepts only a `{ choiceId, scope }` pair of strings; the provider checks them against what it offered. */
+function readRememberChoice(value: unknown): { choiceId: string; scope: string } | undefined {
+  const record = value as AnyRecord | null;
+  return record && typeof record.choiceId === 'string' && typeof record.scope === 'string'
+    ? { choiceId: record.choiceId, scope: record.scope }
+    : undefined;
 }
 
 /**
@@ -586,7 +595,7 @@ function handlePermissionResponse(data: AnyRecord, dependencies: ChatWebSocketDe
  * - `chat.abort`               { sessionId }
  * - `chat.stop-task`           { sessionId, taskId }
  * - `chat.subscribe`           { sessions: [{ sessionId, lastSeq? }] }
- * - `chat.permission-response` { requestId, allow, updatedInput?, message?, rememberEntry? }
+ * - `chat.permission-response` { requestId, allow, updatedInput?, message?, rememberEntry?, rememberChoice? }
  *
  * Outbound protocol (server to client): every frame is `kind`-based — either
  * a provider `NormalizedMessage` (with `seq`) or a gateway event
