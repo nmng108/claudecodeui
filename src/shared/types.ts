@@ -1278,6 +1278,24 @@ export type ProviderMcpServer = {
   projectDisplayName?: string;
 };
 
+/** Outcome of a live MCP connection check: `auth_required` means a remote server answered 401/403 and needs a sign-in with the provider's own tool. */
+export type McpConnectionStatus = 'connected' | 'failed' | 'auth_required' | 'timeout';
+
+/** What the connection-check endpoint returns for one server; `message` explains any non-connected status and `serverInfo` is what the server reported about itself. */
+export type McpConnectionCheckResult = {
+  status: McpConnectionStatus;
+  latencyMs: number;
+  message?: string;
+  serverInfo?: { name?: string; version?: string };
+};
+
+/** Per-row state of the "check connection" action in the MCP list: `isChecking` while a request runs, then either `result` or `error` (the request itself failed). */
+export type McpConnectionCheckState = {
+  isChecking: boolean;
+  result?: McpConnectionCheckResult;
+  error?: string;
+};
+
 /** The success/failure envelope the provider MCP API wraps every response in; narrow on `success` before reading `data` or `error`. */
 export type McpApiResponse<T> =
   | { success: true; data: T }

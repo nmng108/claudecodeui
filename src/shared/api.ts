@@ -567,6 +567,13 @@ export const api = {
       payload: { enabled: boolean; scope: string; workspacePath?: string },
     ) =>
       patch(`/api/providers/${provider}/mcp/servers/${encodeURIComponent(serverName)}/enabled`, payload),
+    // Starts stdio servers to test them, so call it only from an explicit user action.
+    checkMcpServerConnection: (
+      provider: string,
+      serverName: string,
+      payload: { scope: string; workspacePath?: string },
+    ) =>
+      post(`/api/providers/${provider}/mcp/servers/${encodeURIComponent(serverName)}/check`, payload),
 
     skills: (provider: string, { workspacePath }: { workspacePath?: string } = {}) =>
       get(`/api/providers/${encodeURIComponent(provider)}/skills${query({ workspacePath })}`),

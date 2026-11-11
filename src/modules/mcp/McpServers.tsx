@@ -1,12 +1,13 @@
-import { Edit3, ExternalLink, FileJson, Globe, Link2, Lock, Plus, Server, Terminal, Trash2, Users, Zap } from 'lucide-react';
+import { Activity, Edit3, ExternalLink, FileJson, Globe, Link2, Loader2, Lock, Plus, Server, Terminal, Trash2, Users, Zap } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { CentralMcpServer, McpFormState, McpProject, McpProvider, McpScope, ProviderMcpServer } from '@/shared/types';
+import type { CentralMcpServer, McpConnectionCheckState, McpFormState, McpProject, McpProvider, McpScope, ProviderMcpServer } from '@/shared/types';
 import { IS_PLATFORM } from '@/shared/utils';
 import { ActionMenu, Badge, Button } from '@/shared/ui';
 import { MCP_GLOBAL_SUPPORTED_TRANSPORTS, MCP_PROVIDER_NAMES, MCP_SUPPORTS_ENABLE_TOGGLE } from '@/shared/constants';
 import { useMcpServers } from '@/modules/mcp/hooks/useMcpServers';
+import { getConnectionCheckKey, useMcpConnectionChecks } from '@/modules/mcp/hooks/useMcpConnectionChecks';
 import { maskSecret } from '@/modules/mcp/utils/mcpFormatting';
 import McpServerFormModal from '@/modules/mcp/McpServerFormModal';
 import McpRawConfigModal from '@/modules/mcp/McpRawConfigModal';
@@ -80,6 +81,47 @@ function EnabledSwitch({ checked, label, onChange }: { checked: boolean; label: 
     >
       <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-4' : 'translate-x-0.5'}`} />
     </button>
+  );
+}
+
+const CONNECTION_BADGE_CLASSES: Record<'connected' | 'failed' | 'auth_required' | 'timeout', string> = {
+  connected: 'border-green-500/60 text-green-700 dark:text-green-400',
+  failed: 'border-red-500/60 text-red-700 dark:text-red-400',
+  auth_required: 'border-amber-400 text-amber-700 dark:text-amber-400',
+  timeout: 'border-amber-400 text-amber-700 dark:text-amber-400',
+};
+
+// Result badge of a row's connection check; renders nothing until a check has finished.
+function ConnectionBadge({ check }: { check: McpConnectionCheckState | undefined }) {
+  const { t } = useTranslation('settings');
+  const result = check?.result;
+  if (!check || check.isChecking || (!result && !check.error)) {
+    return null;
+  }
+
+  if (!result) {
+    return (
+      <Badge variant="outline" className={`text-xs ${CONNECTION_BADGE_CLASSES.failed}`} title={check.error}>
+        {t('mcpConnection.failed', { defaultValue: 'Check failed' })}
+      </Badge>
+    );
+  }
+
+  const labels = {
+    connected: t('mcpConnection.connected', { defaultValue: 'Connected' }),
+    failed: t('mcpConnection.failed', { defaultValue: 'Check failed' }),
+    auth_required: t('mcpConnection.authRequired', { defaultValue: 'Sign-in required' }),
+    timeout: t('mcpConnection.timeout', { defaultValue: 'Timed out' }),
+  };
+  const serverLabel = [result.serverInfo?.name, result.serverInfo?.version].filter(Boolean).join(' ');
+  const title = result.status === 'connected'
+    ? [serverLabel, `${result.latencyMs} ms`].filter(Boolean).join(' · ')
+    : result.message;
+
+  return (
+    <Badge variant="outline" className={`text-xs ${CONNECTION_BADGE_CLASSES[result.status]}`} title={title}>
+      {labels[result.status]}
+    </Badge>
   );
 }
 
@@ -157,6 +199,7 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
   // Problem from the last shared-server action on a row, shown above the list.
   const [sharedError, setSharedError] = useState<string | null>(null);
   const central = useCentralMcpServers();
+  const { checks, checkServer } = useMcpConnectionChecks(selectedProvider);
 
   // The form hook reloads its fields whenever this object's identity changes, so it must be
   // stable while the form is open; an inline literal would wipe what the user has typed on
@@ -305,6 +348,7 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
           const managed = isManagedServer(server);
           const shared = findShared(server);
           const sharedTarget = shared?.targets.find((target) => target.provider === selectedProvider);
+          const check = checks[getConnectionCheckKey(server)];
 
           return (
             <div key={getServerKey(server)} className="rounded-lg border border-border bg-card/50 p-4">
@@ -333,6 +377,7 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
                         )}
                       </>
                     )}
+                    {!managed && <ConnectionBadge check={check} />}
                     {shared && sharedTarget && (
                       <Badge
                         variant="outline"
@@ -365,6 +410,9 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
                         </button>
                       </div>
                     )}
+                    {!managed && (check?.error || (check?.result && check.result.status !== 'connected' && check.result.message)) && (
+                      <div className="text-xs">{check.error || check.result?.message}</div>
+                    )}
                     {!managed && (
                       <>
                         <ConfigLine label={t('mcpServers.config.command')}>{server.command || ''}</ConfigLine>
@@ -393,6 +441,17 @@ export default function McpServers({ selectedProvider, currentProjects }: McpSer
 
                 {!managed && (
                   <div className="ml-4 flex items-center gap-2">
+                    <Button
+                      onClick={() => void checkServer(server)}
+                      disabled={check?.isChecking}
+                      variant="ghost"
+                      size="sm"
+                      className="text-muted-foreground hover:text-foreground"
+                      title={t('mcpConnection.checkAction', { defaultValue: 'Check connection' })}
+                      aria-label={t('mcpConnection.checkAction', { defaultValue: 'Check connection' })}
+                    >
+                      {check?.isChecking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Activity className="h-4 w-4" />}
+                    </Button>
                     {!shared && server.scope !== 'local' && server.transport !== 'sse' && (
                       <Button
                         onClick={() => void runSharedAction(() => central.importEntry({

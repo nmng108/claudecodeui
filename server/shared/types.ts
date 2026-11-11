@@ -955,6 +955,41 @@ export type SetProviderMcpServerEnabledInput = {
 };
 
 /**
+ * Outcome of one live MCP connection check. `connected` means the server
+ * answered an MCP `initialize` request; `auth_required` means a remote server
+ * rejected the request with 401/403 (sign in with the provider's own tool);
+ * `timeout` means no answer arrived in time; `failed` covers everything else
+ * (spawn error, early exit, non-2xx reply, malformed reply).
+ */
+export type McpConnectionStatus = 'connected' | 'failed' | 'auth_required' | 'timeout';
+
+/**
+ * Result of probing one configured MCP server. `message` carries the failure
+ * reason (never set for `connected`); `serverInfo` is the name/version the
+ * server reported in its `initialize` reply, when it sent one.
+ */
+export type McpConnectionCheckResult = {
+  provider: LLMProvider;
+  name: string;
+  scope: McpScope;
+  status: McpConnectionStatus;
+  latencyMs: number;
+  message?: string;
+  serverInfo?: { name?: string; version?: string };
+};
+
+/**
+ * Identifies one configured MCP server for a connection check. Used by the
+ * provider MCP service and routes; `workspacePath` is required for the
+ * `project` and `local` scopes.
+ */
+export type CheckProviderMcpConnectionInput = {
+  name: string;
+  scope?: McpScope;
+  workspacePath?: string;
+};
+
+/**
  * Syntax of a provider's MCP config file. `jsonc` allows comments and trailing
  * commas (OpenCode); `toml` is Codex's `config.toml`.
  */

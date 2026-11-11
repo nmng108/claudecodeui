@@ -6,6 +6,7 @@ import { providerCapabilitiesService } from '@/modules/providers/services/provid
 import { providerCliService } from '@/modules/providers/services/provider-cli.service.js';
 import { providerMcpService } from '@/modules/providers/services/mcp.service.js';
 import { providerMcpCentralService } from '@/modules/providers/services/mcp-central.service.js';
+import { providerMcpConnectionService } from '@/modules/providers/services/mcp-connection.service.js';
 import { providerSkillsCentralService } from '@/modules/providers/services/skills-central.service.js';
 import { providerModelsService } from '@/modules/providers/services/provider-models.service.js';
 import { providerTokenUsageService } from '@/modules/providers/services/provider-token-usage.service.js';
@@ -1067,6 +1068,24 @@ router.patch(
       enabled: body.enabled,
     });
     res.json(createApiSuccessResponse({ server }));
+  }),
+);
+
+/**
+ * Live connection check for one configured server. A POST because stdio
+ * servers are started to answer it; the client only calls it on a click.
+ */
+router.post(
+  '/:provider/mcp/servers/:name/check',
+  asyncHandler(async (req: Request, res: Response) => {
+    const provider = parseProvider(req.params.provider);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const result = await providerMcpConnectionService.checkProviderMcpServerConnection(provider, {
+      name: readPathParam(req.params.name, 'name'),
+      scope: parseMcpScope(body.scope),
+      workspacePath: readOptionalQueryString(body.workspacePath),
+    });
+    res.json(createApiSuccessResponse({ result }));
   }),
 );
 
