@@ -332,6 +332,26 @@ const connection = new AgentSideConnection((_client) => ({
       return { stopReason: 'end_turn' };
     }
 
+    if (scenario === 'text-tool-text') {
+      // Prose, a tool call, more prose. Kiro stores each stretch of prose as its own message.
+      const say = (text: string) => connection.sessionUpdate({
+        sessionId,
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } },
+      });
+      await say('First ');
+      await say('part.');
+      await connection.sessionUpdate({
+        sessionId,
+        update: { sessionUpdate: 'tool_call', toolCallId: 'tool-1', title: 'List files', kind: 'execute', status: 'pending', rawInput: { command: 'ls' } },
+      });
+      await connection.sessionUpdate({
+        sessionId,
+        update: { sessionUpdate: 'tool_call_update', toolCallId: 'tool-1', status: 'completed', rawOutput: 'a.txt' },
+      });
+      await say('Second part.');
+      return { stopReason: 'end_turn' };
+    }
+
     if (scenario === 'echo-key-check') {
       // Never reached: initialize() does not fail in this scenario anymore —
       // kept as a no-op branch so an unexpected prompt call after an

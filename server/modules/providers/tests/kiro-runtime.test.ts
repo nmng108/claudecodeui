@@ -135,6 +135,28 @@ test('Kiro runtime joins streamed thought chunks into one thinking message per t
   });
 });
 
+test('Kiro runtime ends each stretch of prose with stream_end so it matches its stored message', async () => {
+  await withFakeCli('text-tool-text', async ({ dir, messages, ws }) => {
+    await kiroRuntime.run('hello', { cwd: dir, sessionId: 'app-segments' }, ws, makeContext());
+
+    const sequence = messages
+      .filter((m) => ['stream_delta', 'stream_end', 'tool_use', 'tool_result'].includes(m.kind))
+      .map((m) => (m.kind === 'stream_delta' ? `delta:${m.content}` : m.kind));
+    assert.deepEqual(sequence, [
+      'delta:First ',
+      'delta:part.',
+      'stream_end',
+      'tool_use',
+      'tool_result',
+      'delta:Second part.',
+      'stream_end',
+    ]);
+    // The last segment is closed before the turn is reported finished.
+    const kinds = messages.map((m) => m.kind);
+    assert.ok(kinds.lastIndexOf('stream_end') < kinds.indexOf('complete'));
+  });
+});
+
 for (const [label, allow, expected] of [['allow', true, 'permission allowed, ran it'], ['deny', false, 'permission denied']] as const) {
   test(`Kiro runtime permission round trip: ${label}`, async () => {
     await withFakeCli('permission', async ({ dir, messages, ws }) => {

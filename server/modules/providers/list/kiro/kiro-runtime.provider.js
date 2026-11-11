@@ -177,6 +177,22 @@ async function runKiro(command, options = {}, ws, context) {
     ws.send(createNormalizedMessage({ kind: 'thinking', content, sessionId: capturedSessionId || sessionId || null, provider: 'kiro' }));
   };
 
+  // Kiro stores one assistant message per stretch of prose between tool calls,
+  // and the UI matches each live reply to its stored copy by exact text. All the
+  // prose of a turn would otherwise pile into one live row that matches none of
+  // them and shows the reply twice once history is fetched. So the stretch is
+  // closed with `stream_end` whenever something other than prose arrives (the
+  // way Claude does at the end of a content block) and at the end of the turn.
+  let textSegmentOpen = false;
+  const closeTextSegment = () => {
+    if (!textSegmentOpen) {
+      return;
+    }
+    textSegmentOpen = false;
+    ws.send(createNormalizedMessage({ kind: 'stream_end', sessionId: capturedSessionId || sessionId || null, provider: 'kiro' }));
+  };
+  const SEGMENT_ENDING_UPDATES = new Set(['tool_call', 'tool_call_chunk', 'tool_call_update', 'plan', 'agent_thought_chunk']);
+
   try {
     client = new KiroAcpClient({
       cwd: workingDirectory,
@@ -185,12 +201,16 @@ async function runKiro(command, options = {}, ws, context) {
       events: {
         onSessionUpdate: (event) => {
           const activeSessionId = capturedSessionId || sessionId || null;
+          if (SEGMENT_ENDING_UPDATES.has(event.type) || (event.type === 'agent_message_chunk' && event.isThought)) {
+            closeTextSegment();
+          }
           switch (event.type) {
             case 'agent_message_chunk':
               if (event.isThought) {
                 pendingThought += event.text;
               } else {
                 flushThought();
+                textSegmentOpen = true;
                 ws.send(createNormalizedMessage({ kind: 'stream_delta', content: event.text, sessionId: activeSessionId, provider: 'kiro' }));
               }
               break;
@@ -292,6 +312,7 @@ async function runKiro(command, options = {}, ws, context) {
         },
         onPermissionRequest: async (event) => {
           const activeSessionId = capturedSessionId || sessionId || null;
+          closeTextSegment();
           flushThought();
 
           if (shouldAutoApproveKiroPermission(permissionMode, event.capability)) {
@@ -461,6 +482,7 @@ async function runKiro(command, options = {}, ws, context) {
     const promptText = buildKiroPromptText(command, images, files);
     const { stopReason } = await client.prompt(promptText);
     // A turn can end on a thought (for example when it is cancelled); send what was streamed.
+    closeTextSegment();
     flushThought();
 
     ws.send(createNormalizedMessage({ kind: 'status', text: 'stop_reason', stopReason, sessionId: capturedSessionId || sessionId || null, provider: 'kiro' }));
@@ -481,6 +503,7 @@ async function runKiro(command, options = {}, ws, context) {
 
     void initializeResponse; // available for future capability checks (T5/T6)
   } catch (error) {
+    closeTextSegment();
     flushThought();
     const session = activeKiroSessions.get(mapKey());
     const wasAborted = aborted || session?.status === 'aborted';
