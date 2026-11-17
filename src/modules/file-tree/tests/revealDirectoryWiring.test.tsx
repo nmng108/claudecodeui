@@ -45,11 +45,12 @@ vi.mock('@/shared/api', () => ({
 }));
 
 const { default: FileTree } = await import('@/modules/file-tree/FileTree');
+const { UiPreferencesProvider } = await import('@/shared/context/UiPreferencesContext');
 
 const project: Project = { projectId: 'p1', displayName: 'personal', fullPath: ROOT, path: ROOT };
 
 test('a relative directory reference expands that folder in the tree', async () => {
-  render(<FileTree selectedProject={project} revealDirectory={{ path: 'decisions/' }} />);
+  render(<UiPreferencesProvider><FileTree selectedProject={project} revealDirectory={{ path: 'decisions/' }} /></UiPreferencesProvider>);
 
   await waitFor(() => assert.ok(screen.getByText('decisions')));
   // Visible only because the folder was expanded and its children fetched for us.
@@ -57,7 +58,7 @@ test('a relative directory reference expands that folder in the tree', async () 
 });
 
 test('a reference to a nested folder opens every level on the way down', async () => {
-  render(<FileTree selectedProject={project} revealDirectory={{ path: 'decisions/archive/' }} />);
+  render(<UiPreferencesProvider><FileTree selectedProject={project} revealDirectory={{ path: 'decisions/archive/' }} /></UiPreferencesProvider>);
 
   await waitFor(() => assert.ok(screen.getByText('old.md')));
   assert.ok(screen.getByText('0001-first.md'));
@@ -65,7 +66,7 @@ test('a reference to a nested folder opens every level on the way down', async (
 
 test('a folder nobody asked for stays closed and is never fetched', async () => {
   listFiles.mockClear();
-  render(<FileTree selectedProject={project} revealDirectory={null} />);
+  render(<UiPreferencesProvider><FileTree selectedProject={project} revealDirectory={null} /></UiPreferencesProvider>);
 
   await waitFor(() => assert.ok(screen.getByText('decisions')));
   assert.equal(screen.queryByText('0001-first.md'), null);

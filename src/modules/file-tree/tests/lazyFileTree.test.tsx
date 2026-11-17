@@ -4,6 +4,7 @@ import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-li
 import { beforeEach, test, vi } from 'vitest';
 
 import { buildSearchTree } from '@/modules/file-tree/utils/fileTreeUtils';
+import { UiPreferencesProvider } from '@/shared/context/UiPreferencesContext';
 import { directoryRevealProgress } from '@/modules/file-tree/utils/revealDirectory';
 import type { FileTreeSearchHit, Project } from '@/shared/types';
 
@@ -21,7 +22,7 @@ const dir = (parent: string, name: string): Entry => ({ type: 'directory', name,
 const file = (parent: string, name: string): Entry => ({ type: 'file', name, path: `${parent}/${name}` });
 
 let listings: Record<string, Entry[]> = {};
-const listFiles = vi.fn(async (_projectId: string, directoryPath?: string | null) => {
+const listFiles = vi.fn(async (_projectId: string, directoryPath?: string | null, _options?: { respectGitignore?: boolean }) => {
   const key = directoryPath ?? ROOT;
   if (!(key in listings)) {
     return { ok: false, status: 404, text: async () => JSON.stringify({ error: 'Directory not found' }) };
@@ -32,7 +33,7 @@ const searchFiles = vi.fn();
 
 vi.mock('@/shared/api', () => ({
   api: {
-    listFiles: (...args: [string, (string | null)?]) => listFiles(...args),
+    listFiles: (...args: [string, (string | null)?, { respectGitignore?: boolean }?]) => listFiles(...args),
     searchFiles: (...args: unknown[]) => searchFiles(...args),
   },
 }));
@@ -108,7 +109,7 @@ test('a root that cannot be listed reports the server message', async () => {
 });
 
 test('clicking a folder in the tree fetches and shows its children', async () => {
-  render(<FileTree selectedProject={project} />);
+  render(<UiPreferencesProvider><FileTree selectedProject={project} /></UiPreferencesProvider>);
   await waitFor(() => assert.ok(screen.getByText('repo-a')));
   assert.equal(screen.queryByText('package.json'), null);
 
@@ -133,7 +134,7 @@ test('typing in the search box searches the server and shows the matches with th
       truncated: false,
     }),
   });
-  render(<FileTree selectedProject={project} />);
+  render(<UiPreferencesProvider><FileTree selectedProject={project} /></UiPreferencesProvider>);
   await waitFor(() => assert.ok(screen.getByText('repo-a')));
 
   fireEvent.change(screen.getAllByRole('textbox')[0], { target: { value: 'index' } });
@@ -146,6 +147,54 @@ test('typing in the search box searches the server and shows the matches with th
   assert.ok(screen.getByText('src'));
   assert.equal(screen.queryByText('repo-b'), null);
   assert.equal(screen.queryByText('README.md'), null);
+});
+
+test('ignored files are hidden by default and requested only when shown', async () => {
+  const { result, rerender } = renderHook(
+    ({ showIgnoredFiles }: { showIgnoredFiles?: boolean }) => useFileTreeData(project, { showIgnoredFiles }),
+    { initialProps: {} as { showIgnoredFiles?: boolean } },
+  );
+  await waitFor(() => assert.equal(result.current.files.length, 3));
+  assert.equal(listFiles.mock.calls[0][2]?.respectGitignore, true, 'the default hides what .gitignore excludes');
+
+  rerender({ showIgnoredFiles: true });
+
+  await waitFor(() => assert.equal(listFiles.mock.calls.at(-1)?.[2]?.respectGitignore, false));
+});
+
+test('turning the ignored-files switch reloads the root and every folder that was opened', async () => {
+  const { result, rerender } = renderHook(
+    ({ showIgnoredFiles }: { showIgnoredFiles: boolean }) => useFileTreeData(project, { showIgnoredFiles }),
+    { initialProps: { showIgnoredFiles: false } },
+  );
+  await waitFor(() => assert.equal(result.current.files.length, 3));
+  act(() => result.current.loadDirectory(`${ROOT}/repo-a`));
+  await waitFor(() => assert.equal(result.current.files[0]?.children?.length, 2));
+
+  listings[`${ROOT}/repo-a`] = [...listings[`${ROOT}/repo-a`], file(`${ROOT}/repo-a`, '.env')];
+  listFiles.mockClear();
+  rerender({ showIgnoredFiles: true });
+
+  await waitFor(() => assert.equal(result.current.files[0]?.children?.length, 3));
+  assert.deepEqual([...requestedPaths()].sort(), [null, `${ROOT}/repo-a`].sort());
+  assert.ok(listFiles.mock.calls.every((call) => call[2]?.respectGitignore === false));
+});
+
+test('the search follows the ignored-files switch', async () => {
+  searchFiles.mockResolvedValue({ ok: true, json: async () => ({ results: [], truncated: false }) });
+  const { useFileTreeSearch } = await import('@/modules/file-tree/hooks/useFileTreeSearch');
+  const { result, rerender } = renderHook(
+    ({ showIgnoredFiles }: { showIgnoredFiles: boolean }) => useFileTreeSearch({ projectId: 'p1', showIgnoredFiles }),
+    { initialProps: { showIgnoredFiles: false } },
+  );
+
+  act(() => result.current.setSearchQuery('needle'));
+  await waitFor(() => assert.equal(searchFiles.mock.calls.length, 1));
+  assert.equal(searchFiles.mock.calls[0][1].respectGitignore, true);
+
+  rerender({ showIgnoredFiles: true });
+  await waitFor(() => assert.equal(searchFiles.mock.calls.length, 2));
+  assert.equal(searchFiles.mock.calls[1][1].respectGitignore, false);
 });
 
 const hit = (relativePath: string, type: 'file' | 'directory' = 'file', root = ROOT): FileTreeSearchHit => ({
