@@ -5,6 +5,7 @@ import path from 'node:path';
 import { projectsDb, sessionsDb } from '@/modules/database/index.js';
 import { broadcastSessionUpserted, chatRunRegistry } from '@/modules/websocket/index.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
+import { listKiroCompactions } from '@/modules/providers/list/kiro/kiro-compaction-registry.js';
 import { deleteKiroSessionFromDisk } from '@/modules/providers/list/kiro/kiro-session-delete.js';
 import { listBusyClaudeCliSessions } from '@/modules/providers/services/claude-cli-liveness.service.js';
 import { sessionHistoryCache } from '@/modules/providers/services/session-history-cache.service.js';
@@ -93,6 +94,9 @@ type SessionDetails = {
     isArchived: boolean;
   } | null;
 };
+
+/** Activity label the client shows while a Kiro compaction runs. */
+const KIRO_COMPACTING_STATUS_TEXT = 'Compacting conversation';
 
 const MAX_CLOUDCLI_SESSION_NAME_WORDS = 4;
 
@@ -184,6 +188,24 @@ export const sessionsService = {
           tasks,
         });
       }
+    }
+
+    // A Kiro `/compact` is a blocking command, not a chat run, so no registry
+    // above knows about it. Reporting it keeps the indicator alive across polls
+    // and shows it in every tab; it cannot be interrupted.
+    for (const compaction of listKiroCompactions()) {
+      if (runningById.has(compaction.sessionId)) {
+        continue;
+      }
+      entries.push({
+        sessionId: compaction.sessionId,
+        provider: 'kiro',
+        startedAt: compaction.startedAt,
+        lastSeq: chatRunRegistry.getRun(compaction.sessionId)?.lastSeq ?? 0,
+        canInterrupt: false,
+        statusText: KIRO_COMPACTING_STATUS_TEXT,
+      });
+      runningById.set(compaction.sessionId, entries[entries.length - 1]);
     }
 
     // The chat-run registry only knows about turns CloudCLI drives itself, so

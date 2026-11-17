@@ -94,14 +94,14 @@ async function executeCommand(
   }, kiro, sessionModels);
 }
 
-async function listCommands(provider: string | undefined): Promise<{ builtIn: Array<{ name: string }>; custom: unknown[] }> {
+async function listCommands(provider: string | undefined): Promise<{ builtIn: Array<{ name: string; metadata?: Record<string, unknown> }>; custom: unknown[] }> {
   return withCommandsServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/list`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ projectPath: '/project', provider }),
     });
     assert.equal(response.status, 200);
-    return await response.json() as { builtIn: Array<{ name: string }>; custom: unknown[] };
+    return await response.json() as { builtIn: Array<{ name: string; metadata?: Record<string, unknown> }>; custom: unknown[] };
   });
 }
 
@@ -156,6 +156,12 @@ test('the command list is provider specific: Kiro gets its own set and no Claude
   assert.ok(claude.includes('/memory'));
   assert.ok(!claude.includes('/effort') && !claude.includes('/compact'));
   assert.deepEqual(unspecified, claude, 'a client that sends no provider keeps the Claude list');
+});
+
+test('Kiro /compact carries the label the client shows while it runs', async () => {
+  const compact = (await listCommands('kiro')).builtIn.find((command) => command.name === '/compact');
+
+  assert.equal(compact?.metadata?.pendingLabel, 'Compacting conversation');
 });
 
 test('Kiro help lists the Kiro commands, not Claude Code ones', async () => {

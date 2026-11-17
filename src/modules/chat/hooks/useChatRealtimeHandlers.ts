@@ -16,6 +16,9 @@ const hasActionablePermissionRequests = (requests: Array<{ toolName?: unknown }>
   return Array.isArray(requests) && requests.some((request) => isActionablePermissionRequest(request));
 };
 
+/** Activity label shown while the CLI compacts the conversation. */
+const COMPACTING_STATUS_TEXT = 'Compacting conversation';
+
 type UseChatRealtimeHandlersArgs = {
   isActive: boolean;
   subscribe: (listener: (event: ServerEvent) => void) => () => void;
@@ -285,6 +288,23 @@ export function useChatRealtimeHandlers({
 
       if (sid && shouldPersist) {
         sessionStore.appendRealtime(sid, msg as unknown as NormalizedMessage);
+      }
+
+      // A compaction runs inside a turn, but the CLI reports it only as a
+      // transcript row, not as a `status` event, so the indicator would keep
+      // rotating its generic words for the minutes it can take. Name it while
+      // it runs, and hand the label back to the rotation once it ends. Only a
+      // session that is already in flight is touched: a compaction row replayed
+      // on a reload must not mark an idle session as processing.
+      if (sid && msg.kind === 'text' && msg.compact) {
+        const current = getSessionActivity?.(sid);
+        if ((msg.compact as { phase?: string }).phase === 'running') {
+          if (current) {
+            onSessionProcessing?.(sid, { statusText: COMPACTING_STATUS_TEXT, canInterrupt: current.canInterrupt });
+          }
+        } else if (current?.statusText === COMPACTING_STATUS_TEXT) {
+          onSessionProcessing?.(sid, { statusText: null, canInterrupt: current.canInterrupt });
+        }
       }
 
       // --- UI side effects for specific kinds ---

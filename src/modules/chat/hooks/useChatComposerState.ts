@@ -15,7 +15,7 @@ import { useTranslation } from 'react-i18next';
 import { api, ApiRequestError } from '@/shared/api';
 import { PROVIDER_PERMISSION_PREFERENCE_KEYS } from '@/shared/constants';
 import { readUserPreference } from '@/shared/userSettings';
-import type { BackgroundSendChoice, BackgroundSendPrompt, CommandModalPayload, CostCommandData, HelpCommandData, MarkSessionProcessing, ModelCommandData, QueuedDraft, SessionActivityMap, StatusCommandData,QueuedSendOptions,ChatAttachment,ChatMessage,PendingPermissionRequest,PermissionDecision,PermissionMode,SessionEstablishedContext,Project,ProjectSession,LLMProvider,SlashCommand } from '@/shared/types';
+import type { BackgroundSendChoice, BackgroundSendPrompt, CommandModalPayload, CostCommandData, HelpCommandData, MarkSessionIdle, MarkSessionProcessing, ModelCommandData, QueuedDraft, SessionActivityMap, StatusCommandData,QueuedSendOptions,ChatAttachment,ChatMessage,PendingPermissionRequest,PermissionDecision,PermissionMode,SessionEstablishedContext,Project,ProjectSession,LLMProvider,SlashCommand } from '@/shared/types';
 import { grantClaudeToolPermission } from '@/modules/chat/utils/chatPermissions';
 import {
   appendQueuedMessage,
@@ -59,6 +59,8 @@ type UseChatComposerStateArgs = {
   sendMessage: (message: unknown) => void;
   sendByCtrlEnter?: boolean;
   onSessionProcessing?: MarkSessionProcessing;
+  /** Clears a session's activity once a long-running command (e.g. Kiro /compact) answers. */
+  onSessionIdle?: MarkSessionIdle;
   /**
    * Invoked with the freshly allocated session id when the user sends the
    * first message of a brand-new conversation. The backend allocates the id
@@ -221,6 +223,7 @@ export function useChatComposerState({
   sendMessage,
   sendByCtrlEnter,
   onSessionProcessing,
+  onSessionIdle,
   onSessionEstablished,
   onFileOpen,
   onShowSettings,
@@ -277,6 +280,10 @@ export function useChatComposerState({
       submitOptions?: SubmitOptions,
     ) => Promise<void>) | null
   >(null);
+  // Long-running commands (session id + command name) this composer has sent and
+  // not yet seen answered. A ref, not state: it only gates a second start, and
+  // nothing renders from it.
+  const pendingCommandKeysRef = useRef<Set<string>>(new Set());
   const inputValueRef = useRef(input);
   const selectedProjectId = selectedProject?.projectId;
   // Prefer the stable backend-allocated id (selectedSession.id) but fall back
@@ -488,6 +495,24 @@ export function useChatComposerState({
         return;
       }
 
+      // A command the server marks as long-running (Kiro /compact) is one
+      // request that can last minutes. While it runs the session shows that
+      // activity, and the same command is not started a second time.
+      const pendingLabel = typeof command.metadata?.pendingLabel === 'string' ? command.metadata.pendingLabel : null;
+      const pendingKey = pendingLabel
+        ? `${currentSessionId || selectedSession?.id || ''}:${command.name}`
+        : null;
+      const pendingSessionId = currentSessionId || selectedSession?.id || null;
+      if (pendingKey) {
+        if (pendingCommandKeysRef.current.has(pendingKey)) {
+          return;
+        }
+        pendingCommandKeysRef.current.add(pendingKey);
+        if (pendingSessionId) {
+          onSessionProcessing?.(pendingSessionId, { statusText: pendingLabel, canInterrupt: false });
+        }
+      }
+
       try {
         const effectiveInput = rawInput ?? input;
         // Everything typed after the command name is its argument text, line
@@ -550,6 +575,13 @@ export function useChatComposerState({
           content: `Error executing command: ${message}`,
           timestamp: Date.now(),
         });
+      } finally {
+        if (pendingKey) {
+          pendingCommandKeysRef.current.delete(pendingKey);
+          if (pendingSessionId) {
+            onSessionIdle?.(pendingSessionId);
+          }
+        }
       }
     },
     [
@@ -558,6 +590,8 @@ export function useChatComposerState({
       handleBuiltInCommand,
       handleCustomCommand,
       input,
+      onSessionIdle,
+      onSessionProcessing,
       provider,
       selectedProject,
       selectedSession?.id,
@@ -910,6 +944,19 @@ export function useChatComposerState({
       // Upload attached files now so the queued record contains durable image
       // descriptors that can be sent even if another session is open later.
       if (isLoading) {
+        // The same long-running command typed again while it runs would only
+        // wait in the queue and then run a second time.
+        const typedCommandName = currentInput.trim().split(/\s/)[0];
+        const typedCommandKey = `${currentSessionId || selectedSession?.id || ''}:${typedCommandName}`;
+        if (!queuedSubmission && pendingCommandKeysRef.current.has(typedCommandKey)) {
+          addMessage({
+            type: 'assistant',
+            content: `${typedCommandName} is already running.`,
+            timestamp: Date.now(),
+          });
+          return;
+        }
+
         // A run can restart in the tiny gap between scheduling and flushing a
         // queued submission. Put the same durable draft back without uploading
         // its files again.

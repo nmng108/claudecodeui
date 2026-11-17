@@ -269,7 +269,10 @@ const kiroBuiltInCommands = [
     name: "/compact",
     description: "Summarize the conversation to free up context",
     namespace: "builtin",
-    metadata: { type: "builtin" },
+    // Compaction is one request that can run for minutes. The client shows this
+    // label as the session's activity meanwhile and refuses to run it twice; it
+    // matches the label the running-sessions list reports for the same work.
+    metadata: { type: "builtin", pendingLabel: "Compacting conversation" },
   },
   {
     name: "/cost",

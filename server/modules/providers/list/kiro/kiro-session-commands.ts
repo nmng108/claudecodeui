@@ -2,6 +2,10 @@ import os from 'node:os';
 
 import { sessionsDb } from '@/modules/database/index.js';
 import { KiroAcpClient } from '@/modules/providers/list/kiro/kiro-acp.client.js';
+import {
+  beginKiroCompaction,
+  isKiroSessionCompacting,
+} from '@/modules/providers/list/kiro/kiro-compaction-registry.js';
 import { isKiroSessionRunning } from '@/modules/providers/list/kiro/kiro-runtime.provider.js';
 import { AppError } from '@/shared/utils.js';
 
@@ -33,9 +37,11 @@ async function withLoadedKiroSession<T>(
   sessionId: string | null | undefined,
   fallbackCwd: string | undefined,
   work: (client: KiroAcpClient, events: { onContext(listener: (report: KiroContextReport) => void): void }) => Promise<T>,
+  // `/compact` claims the session before calling in, so it must not trip over its own claim.
+  options: { ownsCompaction?: boolean } = {},
 ): Promise<T> {
   const { kiroSessionId, cwd } = resolveKiroSession(sessionId, fallbackCwd);
-  if (isKiroSessionRunning(kiroSessionId)) {
+  if (isKiroSessionRunning(kiroSessionId) || (!options.ownsCompaction && isKiroSessionCompacting(kiroSessionId))) {
     throw new AppError('Kiro is still working on this session. Try again when the turn has finished.', {
       code: 'KIRO_SESSION_IN_USE',
       statusCode: 409,
@@ -92,12 +98,22 @@ export function toContextReport(meta: Record<string, unknown>): KiroContextRepor
 
 /** `/compact`: summarizes the session's history to free context. */
 export async function compactKiroSession(sessionId: string | null | undefined, cwd?: string): Promise<void> {
-  await withLoadedKiroSession(sessionId, cwd, async (client) => {
-    const result = await client.extMethod('_kiro/session/compact', { sessionId: client.getSessionId() });
-    if (result && (result as { success?: unknown }).success === false) {
-      throw new AppError('Kiro could not compact this session.', { code: 'KIRO_COMPACT_FAILED', statusCode: 502 });
-    }
-  });
+  const { kiroSessionId } = resolveKiroSession(sessionId, cwd);
+  // The id the client knows the session by, so the running-sessions list can name it.
+  const appSessionId = sessionsDb.getSessionByProviderSessionId(kiroSessionId)?.session_id
+    || (typeof sessionId === 'string' ? sessionId.trim() : kiroSessionId);
+  // Claimed before any await: two requests in the same tick cannot both pass.
+  const release = beginKiroCompaction(kiroSessionId, appSessionId);
+  try {
+    await withLoadedKiroSession(sessionId, cwd, async (client) => {
+      const result = await client.extMethod('_kiro/session/compact', { sessionId: client.getSessionId() });
+      if (result && (result as { success?: unknown }).success === false) {
+        throw new AppError('Kiro could not compact this session.', { code: 'KIRO_COMPACT_FAILED', statusCode: 502 });
+      }
+    }, { ownsCompaction: true });
+  } finally {
+    release();
+  }
 }
 
 /** `/context`: asks Kiro for the session's context breakdown. */

@@ -1,6 +1,7 @@
 import { readFile, realpath, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 
+import { isKiroSessionCompacting } from '@/modules/providers/list/kiro/kiro-compaction-registry.js';
 import { isKiroSessionRunning } from '@/modules/providers/list/kiro/kiro-runtime.provider.js';
 import {
   getKiroSessionsRoot,
@@ -114,7 +115,7 @@ export async function deleteKiroSessionFromDisk(
   }
 
   const sessionId = path.basename(sessionDir);
-  if (isKiroSessionRunning(sessionId) || await isSessionLockHeld(sessionDir)) {
+  if (isKiroSessionRunning(sessionId) || isKiroSessionCompacting(sessionId) || await isSessionLockHeld(sessionDir)) {
     throw new AppError('This Kiro session is in use. Stop it before deleting it from disk.', {
       code: 'KIRO_SESSION_IN_USE',
       statusCode: 409,

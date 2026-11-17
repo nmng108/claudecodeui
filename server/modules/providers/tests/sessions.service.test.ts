@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import { closeConnection, initializeDatabase, projectsDb, sessionsDb } from '@/modules/database/index.js';
+import { beginKiroCompaction } from '@/modules/providers/list/kiro/kiro-compaction-registry.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import { sessionsService } from '@/modules/providers/services/sessions.service.js';
 import { chatRunRegistry } from '@/modules/websocket/index.js';
@@ -425,5 +426,31 @@ test('an unreadable registry never fails the running-sessions poll', { concurren
         );
       },
     );
+  });
+});
+
+test('running sessions report a Kiro compaction, which ends with the compaction', { concurrency: false }, async () => {
+  await withIsolatedDatabase(async () => {
+    sessionsDb.createAppSession('compacting-session', 'kiro', '/tmp/running-project');
+
+    await withClaudeCliRegistry([], async () => await withProviders({}, async () => {
+      assert.deepEqual(await sessionsService.listRunningSessions(), []);
+
+      const release = beginKiroCompaction('sess_compacting', 'compacting-session');
+      try {
+        const [entry, ...rest] = await sessionsService.listRunningSessions();
+        assert.equal(rest.length, 0);
+        assert.equal(entry.sessionId, 'compacting-session');
+        assert.equal(entry.provider, 'kiro');
+        assert.equal(entry.statusText, 'Compacting conversation');
+        // There is no run to abort: the request cannot be cancelled.
+        assert.equal(entry.canInterrupt, false);
+        assert.equal(typeof entry.startedAt, 'number');
+      } finally {
+        release();
+      }
+
+      assert.deepEqual(await sessionsService.listRunningSessions(), []);
+    }));
   });
 });

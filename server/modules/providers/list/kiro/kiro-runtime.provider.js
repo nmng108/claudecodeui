@@ -7,6 +7,7 @@ import { notifyRunFailed, notifyRunStopped } from '@/modules/notifications/index
 import { createCompleteMessage, createNormalizedMessage, generateMessageId } from '@/shared/utils.js';
 import { resolveKiroApiKey } from '@/modules/providers/list/kiro/kiro-api-key.store.js';
 import { KiroAcpClient } from '@/modules/providers/list/kiro/kiro-acp.client.js';
+import { isKiroSessionCompacting } from '@/modules/providers/list/kiro/kiro-compaction-registry.js';
 import {
   buildKiroRememberChoices,
   describeKiroAskedResource,
@@ -125,6 +126,24 @@ async function runKiro(command, options = {}, ws, context) {
   // Claude/Codex/OpenCode do for unattended runs: there is no UI tab waiting
   // to answer a `session/request_permission` call, so it is auto-approved
   // with the first allow option ACP offered instead of hanging the turn.
+
+  // A compaction is rewriting the session; a second ACP client on it would race the first.
+  if (isKiroSessionCompacting(providerSessionId)) {
+    const busySessionId = sessionId || providerSessionId;
+    ws.send(createNormalizedMessage({
+      kind: 'error',
+      content: 'Kiro is compacting this conversation. Try again when it finishes.',
+      sessionId: busySessionId,
+      provider: 'kiro',
+    }));
+    ws.send(createCompleteMessage({
+      provider: 'kiro',
+      sessionId: busySessionId,
+      actualSessionId: providerSessionId,
+      exitCode: 1,
+    }));
+    return;
+  }
 
   let client = null;
   let capturedSessionId = providerSessionId || null;
