@@ -868,9 +868,13 @@ const parseSkillProviders = (value: unknown): LLMProvider[] | undefined => {
 
 router.get(
   '/skills/central',
-  asyncHandler(async (_req: Request, res: Response) => {
-    const skills = await providerSkillsCentralService.listCentralSkills();
-    res.json(createApiSuccessResponse({ skills }));
+  asyncHandler(async (req: Request, res: Response) => {
+    const projectId = readOptionalQueryString(req.query.projectId);
+    const [skills, providers] = await Promise.all([
+      providerSkillsCentralService.listCentralSkills(projectId),
+      providerSkillsCentralService.listCentralProviders(projectId),
+    ]);
+    res.json(createApiSuccessResponse({ skills, providers }));
   }),
 );
 
@@ -881,6 +885,7 @@ router.post(
     const result = await providerSkillsCentralService.addCentralSkills(parseProviderSkillCreatePayload(body), {
       providers: parseSkillProviders(body.providers),
       forceCopy: body.mode === 'copy',
+      projectId: readOptionalQueryString(body.projectId),
     });
     res.status(201).json(createApiSuccessResponse(result));
   }),
@@ -893,6 +898,7 @@ router.post(
     const result = await providerSkillsCentralService.adoptProviderSkill(
       parseProvider(body.provider),
       readPathParam(body.directoryName, 'directoryName'),
+      readOptionalQueryString(body.projectId),
     );
     res.status(201).json(createApiSuccessResponse({ results: [result] }));
   }),
@@ -906,6 +912,7 @@ router.post(
       readPathParam(req.params.directoryName, 'directoryName'),
       parseSkillProviders(body.providers),
       body.mode === 'copy',
+      readOptionalQueryString(body.projectId),
     );
     res.json(createApiSuccessResponse({ results }));
   }),
@@ -918,6 +925,7 @@ router.post(
     const results = await providerSkillsCentralService.unlinkCentralSkill(
       readPathParam(req.params.directoryName, 'directoryName'),
       parseSkillProviders(body.providers),
+      readOptionalQueryString(body.projectId),
     );
     res.json(createApiSuccessResponse({ results }));
   }),
@@ -930,6 +938,7 @@ router.post(
     const results = await providerSkillsCentralService.resyncCentralSkill(
       readPathParam(req.params.directoryName, 'directoryName'),
       parseSkillProviders(body.providers),
+      readOptionalQueryString(body.projectId),
     );
     res.json(createApiSuccessResponse({ results }));
   }),
@@ -940,6 +949,7 @@ router.delete(
   asyncHandler(async (req: Request, res: Response) => {
     const result = await providerSkillsCentralService.removeCentralSkill(
       readPathParam(req.params.directoryName, 'directoryName'),
+      readOptionalQueryString(req.query.projectId),
     );
     res.json(createApiSuccessResponse(result));
   }),
@@ -961,7 +971,9 @@ router.post(
   asyncHandler(async (req: Request, res: Response) => {
     const provider = parseProvider(req.params.provider);
     const input = parseProviderSkillCreatePayload(req.body);
-    const skills = await providerSkillsService.addProviderSkills(provider, input);
+    // Left out, the skills go to the user's folder; with a project id, to that project's.
+    const projectId = readOptionalQueryString((req.body as Record<string, unknown> | undefined)?.projectId);
+    const skills = await providerSkillsService.addProviderSkills(provider, input, projectId);
     res.json(createApiSuccessResponse({ provider, skills }));
   }),
 );
@@ -970,9 +982,11 @@ router.delete(
   '/:provider/skills/:directoryName',
   asyncHandler(async (req: Request, res: Response) => {
     const provider = parseProvider(req.params.provider);
-    const result = await providerSkillsService.removeProviderSkill(provider, {
-      directoryName: readPathParam(req.params.directoryName, 'directoryName'),
-    });
+    const result = await providerSkillsService.removeProviderSkill(
+      provider,
+      { directoryName: readPathParam(req.params.directoryName, 'directoryName') },
+      readOptionalQueryString(req.query.projectId),
+    );
     res.json(createApiSuccessResponse(result));
   }),
 );

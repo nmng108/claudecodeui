@@ -8,6 +8,7 @@ import {
   PROVIDER_MODELS_TABLE_SCHEMA_SQL,
   PUSH_SUBSCRIPTIONS_TABLE_SCHEMA_SQL,
   SESSION_DRAFTS_TABLE_SCHEMA_SQL,
+  SKILL_CENTRAL_LINKS_TABLE_SCHEMA_SQL,
   SUPERSEDED_PROVIDER_SESSIONS_TABLE_SCHEMA_SQL,
   SCHEDULED_MESSAGES_TABLE_SCHEMA_SQL,
   SESSIONS_TABLE_SCHEMA_SQL,
@@ -489,6 +490,38 @@ const ensureProjectsForSessionPaths = (db: Database): void => {
   `);
 };
 
+/**
+ * Shared-skill links used to be recorded per skill and provider only, which
+ * cannot say whose folder a row is about once projects have their own. Rebuilds
+ * the table keyed by scope, keeping every existing row as a user-scope row.
+ */
+const addSkillCentralLinkScope = (db: Database): void => {
+  if (!tableExists(db, 'skill_central_links')) {
+    return;
+  }
+
+  const columnNames = getTableInfo(db, 'skill_central_links').map((column) => column.name);
+  if (columnNames.includes('scope_key')) {
+    return;
+  }
+
+  console.log('Running migration: Adding scope_key to skill_central_links');
+  db.exec('BEGIN');
+  try {
+    db.exec('ALTER TABLE skill_central_links RENAME TO skill_central_links__old');
+    db.exec(SKILL_CENTRAL_LINKS_TABLE_SCHEMA_SQL);
+    db.exec(`
+      INSERT INTO skill_central_links (scope_key, skill_name, provider, mode, created_at)
+      SELECT 'user', skill_name, provider, mode, created_at FROM skill_central_links__old
+    `);
+    db.exec('DROP TABLE skill_central_links__old');
+    db.exec('COMMIT');
+  } catch (migrationError) {
+    db.exec('ROLLBACK');
+    throw migrationError;
+  }
+};
+
 export const runMigrations = (db: Database) => {
   try {
     const usersTableInfo = db.prepare('PRAGMA table_info(users)').all() as { name: string }[];
@@ -535,6 +568,7 @@ export const runMigrations = (db: Database) => {
     addForkedFromSessionIdColumn(db);
     ensureProjectsForSessionPaths(db);
     db.exec(SCHEDULED_MESSAGES_TABLE_SCHEMA_SQL);
+    addSkillCentralLinkScope(db);
 
     db.exec('CREATE INDEX IF NOT EXISTS idx_session_ids_lookup ON sessions(session_id)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_provider_session_id ON sessions(provider_session_id)');

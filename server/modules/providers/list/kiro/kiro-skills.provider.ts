@@ -36,4 +36,13 @@ export class KiroSkillsProvider extends SkillsProvider {
       commandPrefix: '/',
     };
   }
+
+  // Skills added to a project are written to its `.kiro/skills`.
+  protected async getProjectSkillSource(workspacePath: string): Promise<ProviderSkillSource> {
+    return {
+      scope: 'project',
+      rootDir: path.join(workspacePath, '.kiro', 'skills'),
+      commandPrefix: '/',
+    };
+  }
 }

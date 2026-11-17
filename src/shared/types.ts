@@ -1964,7 +1964,14 @@ export type CentralSkillProviderStatus = {
   mode?: 'symlink' | 'junction' | 'copy';
 };
 
-/** A skill in the shared skills folder (~/.agents/skills) with its status for every provider; directoryName identifies it in all shared-skill requests. */
+/** How one provider relates to a scope's shared skills folder, regardless of any skill: native providers read the folder themselves, linkable ones have their own folder shared skills can be linked into; a provider that is neither has no skills folder in that scope. */
+export type CentralScopeProvider = {
+  provider: SkillsProvider;
+  native: boolean;
+  linkable: boolean;
+};
+
+/** A skill in a shared skills folder (~/.agents/skills, or a project's .agents/skills) with its status for every provider; directoryName identifies it in all shared-skill requests. */
 export type CentralSkill = {
   directoryName: string;
   name: string;
@@ -2003,6 +2010,8 @@ export type ProviderSkill = {
   pluginId?: string;
   projectDisplayName?: string;
   projectPath?: string;
+  /** Id of the project the skill belongs to, set for project-scope skills so a card action can target that project's folders. */
+  projectId?: string;
 };
 
 /** One skill to upload, holding its SKILL.md content, the directory and file names to write it under, and any accompanying base64-encoded support files. */

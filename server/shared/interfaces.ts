@@ -17,6 +17,7 @@ import type {
   ProviderMcpRawConfig,
   ProviderMcpRawConfigWriteResult,
   ProviderSkillRemoveInput,
+  SkillScopeTarget,
   SetProviderMcpServerEnabledInput,
   WriteProviderMcpRawConfigInput,
   ProviderRuntimeContext,
@@ -176,18 +177,25 @@ export interface IProviderSkills {
    * provider's writable user skill folder and return the normalized skill
    * records that were written.
    */
-  addSkills(input: ProviderSkillCreateInput): Promise<ProviderSkill[]>;
+  addSkills(input: ProviderSkillCreateInput, target?: SkillScopeTarget): Promise<ProviderSkill[]>;
 
   removeSkill(
     input: ProviderSkillRemoveInput,
+    target?: SkillScopeTarget,
   ): Promise<{ removed: boolean; provider: LLMProvider; directoryName: string }>;
 
   /**
-   * Folder where this provider keeps user skills added through the app, or null
-   * when the provider has no managed skill folder. The central skills service
-   * links central skills into it.
+   * Folder where this provider keeps the skills added through the app for the
+   * target (the user's, or one project's), or null when the provider has no
+   * managed folder there. The central skills service links shared skills into it.
    */
-  getManagedSkillsRoot(): Promise<string | null>;
+  getSkillsRoot(target: SkillScopeTarget): Promise<string | null>;
+
+  /**
+   * Every folder this provider reads skills from for the target. A provider
+   * whose list includes the shared skills folder sees shared skills without a link.
+   */
+  getReadableRoots(target: SkillScopeTarget): Promise<string[]>;
 }
 
 // ---------------------------

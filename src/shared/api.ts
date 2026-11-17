@@ -577,20 +577,27 @@ export const api = {
 
     skills: (provider: string, { workspacePath }: { workspacePath?: string } = {}) =>
       get(`/api/providers/${encodeURIComponent(provider)}/skills${query({ workspacePath })}`),
+    // `projectId` in the payload (or query) aims the call at that project's skill
+    // folders; left out, it applies to the user's own.
     saveSkills: (provider: string, payload: unknown) =>
       post(`/api/providers/${provider}/skills`, payload),
-    centralSkills: () => get('/api/providers/skills/central'),
+    deleteSkill: (provider: string, directoryName: string, { projectId }: { projectId?: string } = {}) =>
+      del(`/api/providers/${encodeURIComponent(provider)}/skills/${encodeURIComponent(directoryName)}${query({ projectId })}`),
+    centralSkills: ({ projectId }: { projectId?: string } = {}) =>
+      get(`/api/providers/skills/central${query({ projectId })}`),
     addCentralSkills: (payload: unknown) => post('/api/providers/skills/central', payload),
-    linkCentralSkill: (directoryName: string, payload: { providers?: string[]; mode?: 'copy' } = {}) =>
-      post(`/api/providers/skills/central/${encodeURIComponent(directoryName)}/link`, payload),
-    unlinkCentralSkill: (directoryName: string, payload: { providers?: string[] } = {}) =>
+    linkCentralSkill: (
+      directoryName: string,
+      payload: { providers?: string[]; mode?: 'copy'; projectId?: string } = {},
+    ) => post(`/api/providers/skills/central/${encodeURIComponent(directoryName)}/link`, payload),
+    unlinkCentralSkill: (directoryName: string, payload: { providers?: string[]; projectId?: string } = {}) =>
       post(`/api/providers/skills/central/${encodeURIComponent(directoryName)}/unlink`, payload),
-    resyncCentralSkill: (directoryName: string, payload: { providers?: string[] } = {}) =>
+    resyncCentralSkill: (directoryName: string, payload: { providers?: string[]; projectId?: string } = {}) =>
       post(`/api/providers/skills/central/${encodeURIComponent(directoryName)}/resync`, payload),
-    adoptCentralSkill: (payload: { provider: string; directoryName: string }) =>
+    adoptCentralSkill: (payload: { provider: string; directoryName: string; projectId?: string }) =>
       post('/api/providers/skills/central/adopt', payload),
-    deleteCentralSkill: (directoryName: string) =>
-      del(`/api/providers/skills/central/${encodeURIComponent(directoryName)}`),
+    deleteCentralSkill: (directoryName: string, { projectId }: { projectId?: string } = {}) =>
+      del(`/api/providers/skills/central/${encodeURIComponent(directoryName)}${query({ projectId })}`),
   },
 
   // Slash commands

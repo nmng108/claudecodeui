@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { closeConnection, initializeDatabase } from '@/modules/database/index.js';
+import { closeConnection, initializeDatabase, projectsDb } from '@/modules/database/index.js';
 import { providerSkillsCentralService } from '@/modules/providers/services/skills-central.service.js';
 import { providerSkillsService } from '@/modules/providers/services/skills.service.js';
 import { AppError } from '@/shared/utils.js';
@@ -160,5 +160,177 @@ test('adopt moves a provider skill into the central folder; remove deletes links
     await assert.rejects(fs.lstat(path.join(home, '.agents', 'skills', 'mine')), { code: 'ENOENT' });
     await assert.rejects(fs.lstat(path.join(home, '.kiro', 'skills', 'mine')), { code: 'ENOENT' });
     await assert.rejects(fs.lstat(path.join(home, '.claude', 'skills', 'mine')), { code: 'ENOENT' });
+  });
+});
+
+// ----------------- Project scope -----------------
+
+/** Registers a project folder inside the fake home and returns its id and path. */
+async function registerProject(home: string, name = 'app'): Promise<{ projectId: string; projectPath: string }> {
+  const projectPath = path.join(home, 'work', name);
+  await fs.mkdir(projectPath, { recursive: true });
+  const { project } = projectsDb.createProjectPath(projectPath, name);
+  return { projectId: project!.project_id, projectPath: project!.project_path };
+}
+
+/**
+ * A project has its own shared folder (`<project>/.agents/skills`), linked into the
+ * project's own provider folders with relative links, and none of it touches the
+ * user's folders.
+ */
+test('a project skill is shared inside the project and never touches the user folders', { concurrency: false }, async () => {
+  await withCentralSkills(async (home) => {
+    const { projectId, projectPath } = await registerProject(home);
+
+    const { skills, results } = await providerSkillsCentralService.addCentralSkills(
+      { entries: [{ directoryName: 'team-skill', content: SKILL('team-skill') }] },
+      { projectId },
+    );
+
+    // Kiro and Claude need a link; Codex, OpenCode and Cursor read `.agents/skills` themselves here.
+    assert.deepEqual(results.map((result) => result.provider).sort(), ['claude', 'kiro']);
+    assert.ok(results.every((result) => result.outcome === 'linked'));
+    const [skill] = skills;
+    assert.equal(skill.sourcePath, path.join(projectPath, '.agents', 'skills', 'team-skill', 'SKILL.md'));
+    for (const provider of ['codex', 'opencode', 'cursor']) {
+      assert.equal(statusOf(skill, provider), 'native', provider);
+    }
+    for (const provider of ['claude', 'kiro']) {
+      assert.equal(statusOf(skill, provider), 'linked', provider);
+      const link = path.join(projectPath, `.${provider}`, 'skills', 'team-skill');
+      assert.ok((await fs.lstat(link)).isSymbolicLink(), provider);
+      // Relative, so the link still resolves when the project is moved or cloned.
+      assert.equal(path.isAbsolute(await fs.readlink(link)), false, provider);
+      assert.match(await fs.readFile(path.join(link, 'SKILL.md'), 'utf8'), /team-skill/);
+    }
+    await assert.rejects(fs.lstat(path.join(projectPath, '.cursor')), { code: 'ENOENT' });
+
+    // The provider lists for the project see it; nothing was written under the home folders.
+    const kiroSkills = await providerSkillsService.listProviderSkills('kiro', { workspacePath: projectPath });
+    assert.ok(kiroSkills.some((entry) => entry.name === 'team-skill' && entry.scope === 'project'));
+    await assert.rejects(fs.lstat(path.join(home, '.agents')), { code: 'ENOENT' });
+    await assert.rejects(fs.lstat(path.join(home, '.kiro')), { code: 'ENOENT' });
+    assert.deepEqual(await providerSkillsCentralService.listCentralSkills(), []);
+  });
+});
+
+test('two projects and the user keep separate shared skills', { concurrency: false }, async () => {
+  await withCentralSkills(async (home) => {
+    const first = await registerProject(home, 'first');
+    const second = await registerProject(home, 'second');
+
+    await providerSkillsCentralService.addCentralSkills(
+      { entries: [{ directoryName: 'only-first', content: SKILL('only-first') }] },
+      { projectId: first.projectId },
+    );
+    await providerSkillsCentralService.addCentralSkills({ entries: [{ directoryName: 'for-me', content: SKILL('for-me') }] });
+
+    const names = async (projectId?: string) =>
+      (await providerSkillsCentralService.listCentralSkills(projectId)).map((skill) => skill.directoryName);
+    assert.deepEqual(await names(first.projectId), ['only-first']);
+    assert.deepEqual(await names(second.projectId), []);
+    assert.deepEqual(await names(), ['for-me']);
+  });
+});
+
+test('unlinking and removing a project skill leaves the user skill of the same name alone', { concurrency: false }, async () => {
+  await withCentralSkills(async (home) => {
+    const { projectId, projectPath } = await registerProject(home);
+    const entries = [{ directoryName: 'same', content: SKILL('same') }];
+    await providerSkillsCentralService.addCentralSkills({ entries });
+    await providerSkillsCentralService.addCentralSkills({ entries }, { projectId });
+
+    const unlinked = await providerSkillsCentralService.unlinkCentralSkill('same', ['kiro'], projectId);
+    assert.equal(unlinked[0].outcome, 'unlinked');
+    await assert.rejects(fs.lstat(path.join(projectPath, '.kiro', 'skills', 'same')), { code: 'ENOENT' });
+    assert.ok((await fs.lstat(path.join(home, '.kiro', 'skills', 'same'))).isSymbolicLink(), 'the user link is untouched');
+
+    const removed = await providerSkillsCentralService.removeCentralSkill('same', projectId);
+    assert.equal(removed.removed, true);
+    await assert.rejects(fs.lstat(path.join(projectPath, '.agents', 'skills', 'same')), { code: 'ENOENT' });
+    assert.ok((await fs.lstat(path.join(home, '.agents', 'skills', 'same'))).isDirectory(), 'the user skill is untouched');
+  });
+});
+
+test('a project copy is recorded under the project, so it can drift and be re-applied there', { concurrency: false }, async () => {
+  await withCentralSkills(async (home) => {
+    const { projectId, projectPath } = await registerProject(home);
+    await providerSkillsCentralService.addCentralSkills(
+      { entries: [{ directoryName: 'snap', content: SKILL('snap', 'One.') }] },
+      { providers: ['kiro'], forceCopy: true, projectId },
+    );
+    const status = async () => statusOf((await providerSkillsCentralService.listCentralSkills(projectId))[0], 'kiro');
+    assert.equal(await status(), 'copy_in_sync');
+
+    await fs.writeFile(path.join(projectPath, '.agents', 'skills', 'snap', 'SKILL.md'), SKILL('snap', 'Two.'));
+    assert.equal(await status(), 'copy_drifted');
+    assert.equal((await providerSkillsCentralService.resyncCentralSkill('snap', ['kiro'], projectId))[0].outcome, 'copied');
+    assert.equal(await status(), 'copy_in_sync');
+  });
+});
+
+test('adopt moves a project skill folder into the project shared folder and links it back', { concurrency: false }, async () => {
+  await withCentralSkills(async (home) => {
+    const { projectId, projectPath } = await registerProject(home);
+    const own = path.join(projectPath, '.kiro', 'skills', 'mine');
+    await fs.mkdir(own, { recursive: true });
+    await fs.writeFile(path.join(own, 'SKILL.md'), SKILL('mine'));
+
+    const adopted = await providerSkillsCentralService.adoptProviderSkill('kiro', 'mine', projectId);
+    assert.equal(adopted.outcome, 'linked');
+    assert.ok((await fs.lstat(own)).isSymbolicLink());
+    assert.match(await fs.readFile(path.join(projectPath, '.agents', 'skills', 'mine', 'SKILL.md'), 'utf8'), /mine/);
+
+    // Cursor reads the project shared folder itself, so there is nothing to adopt into.
+    await assert.rejects(
+      providerSkillsCentralService.adoptProviderSkill('cursor', 'mine', projectId),
+      (error: unknown) => error instanceof AppError && error.code === 'SKILL_LINK_UNSUPPORTED',
+    );
+  });
+});
+
+test('a request for an unknown project, or a name that escapes the folder, is refused', { concurrency: false }, async () => {
+  await withCentralSkills(async (home) => {
+    const { projectId } = await registerProject(home);
+
+    await assert.rejects(
+      providerSkillsCentralService.listCentralSkills('no-such-project'),
+      (error: unknown) => error instanceof AppError && error.code === 'PROJECT_NOT_FOUND' && error.statusCode === 404,
+    );
+    await assert.rejects(
+      providerSkillsCentralService.linkCentralSkill('../escape', undefined, false, projectId),
+      (error: unknown) => error instanceof AppError && error.code === 'SKILL_DIRECTORY_INVALID',
+    );
+  });
+});
+
+/** Per-provider project skills: where each provider writes them, and which refuse. */
+test('providerSkillsService writes and removes project skills in each provider\'s project folder', { concurrency: false }, async () => {
+  await withCentralSkills(async (home) => {
+    const { projectId, projectPath } = await registerProject(home);
+    const input = { entries: [{ directoryName: 'proj-skill', content: SKILL('proj-skill') }] };
+    const folders: Record<string, string> = {
+      kiro: '.kiro',
+      claude: '.claude',
+      cursor: '.cursor',
+      codex: '.agents',
+    };
+
+    for (const [provider, folder] of Object.entries(folders)) {
+      const [written] = await providerSkillsService.addProviderSkills(provider, input, projectId);
+      assert.equal(written.scope, 'project', provider);
+      assert.equal(written.sourcePath, path.join(projectPath, folder, 'skills', 'proj-skill', 'SKILL.md'), provider);
+    }
+    await assert.rejects(fs.lstat(path.join(home, '.kiro')), { code: 'ENOENT' });
+
+    const removed = await providerSkillsService.removeProviderSkill('kiro', { directoryName: 'proj-skill' }, projectId);
+    assert.equal(removed.removed, true);
+    await assert.rejects(fs.lstat(path.join(projectPath, '.kiro', 'skills', 'proj-skill')), { code: 'ENOENT' });
+    assert.ok((await fs.lstat(path.join(projectPath, '.claude', 'skills', 'proj-skill'))).isDirectory());
+
+    await assert.rejects(
+      providerSkillsService.addProviderSkills('opencode', input, projectId),
+      (error: unknown) => error instanceof AppError && error.code === 'PROVIDER_SKILLS_WRITE_UNSUPPORTED',
+    );
   });
 });

@@ -36,4 +36,12 @@ export class CursorSkillsProvider extends SkillsProvider {
       commandPrefix: '/',
     };
   }
+
+  protected async getProjectSkillSource(workspacePath: string): Promise<ProviderSkillSource> {
+    return {
+      scope: 'project',
+      rootDir: path.join(workspacePath, '.cursor', 'skills'),
+      commandPrefix: '/',
+    };
+  }
 }

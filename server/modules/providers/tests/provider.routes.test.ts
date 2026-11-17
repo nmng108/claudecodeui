@@ -8,7 +8,7 @@ import test from 'node:test';
 
 import express, { type NextFunction, type Request, type Response } from 'express';
 
-import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
+import { closeConnection, initializeDatabase, projectsDb, sessionsDb } from '@/modules/database/index.js';
 import providerRouter from '@/modules/providers/provider.routes.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import type { IProvider } from '@/shared/interfaces.js';
@@ -594,5 +594,108 @@ test('the workflow agent route reads an agent\'s timeline and status from its ru
     const missing = await missingResponse.json() as { error: { code: string } };
     assert.equal(missingResponse.status, 404);
     assert.equal(missing.error.code, 'WORKFLOW_AGENT_NOT_FOUND');
+  });
+});
+
+// ----------------- Project-scoped skills -----------------
+
+const SKILL_MARKDOWN = (name: string) => `---\nname: ${name}\ndescription: ${name} skill\n---\nBody.`;
+
+/** Runs `run` against the routes with the home folder pointed at the test's temporary folder, so no real skills are read. */
+async function withSkillRoutes(
+  run: (ctx: { baseUrl: string; projectId: string; projectPath: string }) => Promise<void>,
+): Promise<void> {
+  await withProviderServer(async (baseUrl, workspacePath) => {
+    const home = path.dirname(workspacePath);
+    const projectPath = path.join(home, 'project');
+    await mkdir(projectPath, { recursive: true });
+    const { project } = projectsDb.createProjectPath(projectPath, 'project');
+
+    const realHomedir = os.homedir;
+    (os as unknown as { homedir: () => string }).homedir = () => home;
+    try {
+      await run({ baseUrl, projectId: project!.project_id, projectPath: project!.project_path });
+    } finally {
+      (os as unknown as { homedir: () => string }).homedir = realHomedir;
+    }
+  });
+}
+
+const postJson = (url: string, body: unknown) => fetch(url, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify(body),
+});
+
+test('skills routes write to a project folder only when a project id is sent', async () => {
+  await withSkillRoutes(async ({ baseUrl, projectId, projectPath }) => {
+    const entries = [{ directoryName: 'team', content: SKILL_MARKDOWN('team') }];
+
+    const added = await postJson(`${baseUrl}/api/providers/kiro/skills`, { entries, projectId });
+    assert.equal(added.status, 200);
+    assert.equal((await readFile(path.join(projectPath, '.kiro', 'skills', 'team', 'SKILL.md'), 'utf8')).includes('team'), true);
+
+    // Without a project id the same call goes to the user's folder (the fake home here).
+    const home = path.dirname(projectPath);
+    const global = await postJson(`${baseUrl}/api/providers/kiro/skills`, { entries });
+    assert.equal(global.status, 200);
+    assert.equal((await readFile(path.join(home, '.kiro', 'skills', 'team', 'SKILL.md'), 'utf8')).includes('team'), true);
+
+    const removed = await fetch(`${baseUrl}/api/providers/kiro/skills/team?projectId=${projectId}`, { method: 'DELETE' });
+    assert.equal(removed.status, 200);
+    assert.equal(((await removed.json()) as { data: { removed: boolean } }).data.removed, true);
+    await assert.rejects(readFile(path.join(projectPath, '.kiro', 'skills', 'team', 'SKILL.md'), 'utf8'), { code: 'ENOENT' });
+    assert.equal((await readFile(path.join(home, '.kiro', 'skills', 'team', 'SKILL.md'), 'utf8')).includes('team'), true);
+  });
+});
+
+test('shared skills routes list, link and unlink inside one project', async () => {
+  await withSkillRoutes(async ({ baseUrl, projectId, projectPath }) => {
+    const added = await postJson(`${baseUrl}/api/providers/skills/central`, {
+      projectId,
+      providers: ['kiro'],
+      entries: [{ directoryName: 'shared', content: SKILL_MARKDOWN('shared') }],
+    });
+    assert.equal(added.status, 201);
+
+    const listed = await fetch(`${baseUrl}/api/providers/skills/central?projectId=${projectId}`);
+    const listing = ((await listed.json()) as { data: {
+      skills: Array<{ directoryName: string; providers: Array<{ provider: string; state: string }> }>;
+      providers: Array<{ provider: string; native: boolean; linkable: boolean }>;
+    } }).data;
+    const skills = listing.skills;
+    const byProvider = Object.fromEntries(listing.providers.map((entry) => [entry.provider, entry]));
+    assert.deepEqual([byProvider.kiro.native, byProvider.kiro.linkable], [false, true]);
+    assert.deepEqual([byProvider.cursor.native, byProvider.cursor.linkable], [true, false], 'Cursor reads a project\'s .agents/skills itself');
+    assert.deepEqual([byProvider.codex.native, byProvider.codex.linkable], [true, false]);
+    assert.deepEqual(skills.map((skill) => skill.directoryName), ['shared']);
+    const states = Object.fromEntries(skills[0].providers.map((entry) => [entry.provider, entry.state]));
+    assert.equal(states.kiro, 'linked');
+    assert.equal(states.claude, 'unlinked', 'a provider that needs a link but was not asked for one stays unlinked');
+    assert.equal(states.cursor, 'native');
+
+    const linked = await postJson(`${baseUrl}/api/providers/skills/central/shared/link`, { projectId, providers: ['claude'] });
+    assert.equal(((await linked.json()) as { data: { results: Array<{ outcome: string }> } }).data.results[0].outcome, 'linked');
+    const unlinked = await postJson(`${baseUrl}/api/providers/skills/central/shared/unlink`, { projectId });
+    const outcomes = ((await unlinked.json()) as { data: { results: Array<{ outcome: string }> } }).data.results.map((result) => result.outcome);
+    assert.deepEqual(outcomes.sort(), ['unlinked', 'unlinked']);
+    await assert.rejects(readFile(path.join(projectPath, '.kiro', 'skills', 'shared', 'SKILL.md'), 'utf8'), { code: 'ENOENT' });
+
+    // The user's shared folder never saw it.
+    const userList = await fetch(`${baseUrl}/api/providers/skills/central`);
+    assert.deepEqual(((await userList.json()) as { data: { skills: unknown[] } }).data.skills, []);
+
+    const removed = await fetch(`${baseUrl}/api/providers/skills/central/shared?projectId=${projectId}`, { method: 'DELETE' });
+    assert.equal(((await removed.json()) as { data: { removed: boolean } }).data.removed, true);
+  });
+});
+
+test('skills routes answer 404 for a project that is not registered', async () => {
+  await withSkillRoutes(async ({ baseUrl }) => {
+    const response = await fetch(`${baseUrl}/api/providers/skills/central?projectId=missing-project`);
+    const payload = await response.json() as { error: { code: string } };
+
+    assert.equal(response.status, 404);
+    assert.equal(payload.error.code, 'PROJECT_NOT_FOUND');
   });
 });

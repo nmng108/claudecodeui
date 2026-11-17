@@ -11,6 +11,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Trash2,
   Upload,
   X,
 } from 'lucide-react';
@@ -66,6 +67,16 @@ const PROVIDER_SKILL_PATHS: Record<Exclude<SkillsProvider, 'opencode'>, string> 
   cursor: '~/.cursor/skills/<skill-name>/SKILL.md',
   kiro: '~/.kiro/skills/<skill-name>/SKILL.md',
 };
+
+const PROJECT_SKILL_PATHS: Record<Exclude<SkillsProvider, 'opencode'>, string> = {
+  claude: '<project>/.claude/skills/<skill-name>/SKILL.md',
+  codex: '<project>/.agents/skills/<skill-name>/SKILL.md',
+  cursor: '<project>/.cursor/skills/<skill-name>/SKILL.md',
+  kiro: '<project>/.kiro/skills/<skill-name>/SKILL.md',
+};
+
+/** Value of the scope picker for the user's own skills; any other value is a project id. */
+const GLOBAL_SCOPE = 'global';
 
 const SCOPE_BADGE_CLASSES: Record<SkillsScope, string> = {
   user: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
@@ -191,17 +202,45 @@ const buildQueuedSkillFolders = (selectedFiles: File[], t: (key: string, options
 /** Rendered by the settings module's agents tab to list, upload and delete one provider's skills. */
 export default function ProviderSkills({ selectedProvider, currentProjects }: ProviderSkillsProps) {
   const { t } = useTranslation('settings');
+  // Whose skills the tab lists, adds to, deletes and shares: the user's own, or
+  // those of one project the app has added. Held here because every part of the
+  // tab (list, add dialog, shared dialog) follows it.
+  const [selectedScope, setSelectedScope] = useState(GLOBAL_SCOPE);
+  const projectOptions = useMemo(
+    () => currentProjects.filter((project) => project.projectId),
+    [currentProjects],
+  );
+  // A project that was removed meanwhile falls back to the user's scope.
+  const activeScope = projectOptions.some((project) => project.projectId === selectedScope)
+    ? selectedScope
+    : GLOBAL_SCOPE;
+  // The scope string itself is the project id, so it is read directly instead of
+  // through the matching project object.
+  const activeProjectId = activeScope === GLOBAL_SCOPE ? undefined : activeScope;
+  const activeProjectName = projectOptions.find((project) => project.projectId === activeScope)?.displayName;
+  const activeScopeLabel = activeProjectId
+    ? activeProjectName || activeProjectId
+    : t('skillsScope.global', { defaultValue: 'Global' });
   const {
-    skills,
+    skills: allSkills,
     isLoading,
     isLoadingProjectScopes,
     loadError,
     saveStatus,
     addSkills,
+    removeSkill,
     refreshSkills,
     reloadSkills,
   } = useProviderSkills({ selectedProvider, currentProjects });
-  const central = useCentralSkills();
+  const central = useCentralSkills(activeProjectId);
+  // The list covers every added project; the tab shows one scope of it. Skills
+  // the server finds for its own working folder belong to no added project, so
+  // they are not listed under Global either.
+  const skills = useMemo(() => allSkills.filter((skill) => (
+    activeProjectId
+      ? (skill.scope === 'project' || skill.scope === 'repo') && skill.projectId === activeProjectId
+      : skill.scope !== 'project' && skill.scope !== 'repo'
+  )), [activeProjectId, allSkills]);
   // Whether the shared skills dialog is open.
   const [isSharedOpen, setIsSharedOpen] = useState(false);
   // Add dialog choice: put the skill in the shared folder and link it into every provider instead of only this one.
@@ -221,7 +260,8 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
   const providerName = PROVIDER_NAMES[selectedProvider];
   const providerPath = selectedProvider === 'opencode'
     ? null
-    : PROVIDER_SKILL_PATHS[selectedProvider];
+    : (activeProjectId ? PROJECT_SKILL_PATHS : PROVIDER_SKILL_PATHS)[selectedProvider];
+  const storePath = activeProjectId ? '<project>/.agents/skills' : '~/.agents/skills';
 
   useEffect(() => {
     setQueuedFiles([]);
@@ -366,7 +406,7 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
         await reloadSkills();
         setShareError(problems);
       } else {
-        await addSkills({ entries });
+        await addSkills({ entries, projectId: activeProjectId });
       }
       setQueuedFiles([]);
       setJustInstalled(true);
@@ -376,7 +416,7 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
     } finally {
       setIsSubmitting(false);
     }
-  }, [addSkills, addToShared, central, queuedFiles, reloadSkills, t]);
+  }, [activeProjectId, addSkills, addToShared, central, queuedFiles, reloadSkills, t]);
 
   const handleAddDialogOpenChange = useCallback((open: boolean) => {
     if (open) {
@@ -416,7 +456,10 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
       );
     }
 
-    if (skill.scope === 'user' && directoryName && selectedProvider !== 'opencode' && selectedProvider !== 'codex' && !skill.pluginName) {
+    // A skill can be shared from the scope it lives in, when this provider has a folder there that a link can replace.
+    const ownScope = activeProjectId ? 'project' : 'user';
+    const canShare = central.providers.find((entry) => entry.provider === selectedProvider)?.linkable === true;
+    if (skill.scope === ownScope && directoryName && canShare && !skill.pluginName) {
       return (
         <button
           type="button"
@@ -435,6 +478,45 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
     }
 
     return null;
+  };
+
+  // Delete for a skill that lives only in this provider's own folder in the current scope.
+  // A shared skill is managed (and deleted) from the shared skills dialog instead, so
+  // deleting it here cannot leave dangling links behind.
+  const renderDeleteAction = (skill: ProviderSkill) => {
+    const directoryName = skill.sourcePath ? skill.sourcePath.split(/[\\/]/).slice(-2, -1)[0] : '';
+    const ownScope = activeProjectId ? 'project' : 'user';
+    const isShared = central.skills.some((candidate) => candidate.directoryName === directoryName);
+    if (selectedProvider === 'opencode' || skill.scope !== ownScope || skill.pluginName || !directoryName || isShared) {
+      return null;
+    }
+
+    return (
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="h-8 w-8 flex-shrink-0 p-0 text-muted-foreground hover:text-red-600"
+        title={t('skillsPage.deleteSkill', { defaultValue: 'Delete skill' })}
+        aria-label={t('skillsPage.deleteSkillNamed', { defaultValue: 'Delete {{name}}', name: skill.name })}
+        onClick={() => {
+          if (!window.confirm(t('skillsPage.deleteSkillConfirm', { defaultValue: 'Delete the skill "{{name}}" and its folder?', name: skill.name }))) {
+            return;
+          }
+
+          setShareError(null);
+          void removeSkill(directoryName, activeProjectId)
+            .then((removed) => {
+              if (!removed) {
+                setShareError(t('skillsPage.deleteNothing', { defaultValue: 'Nothing was deleted: this skill is not in a folder the app manages.' }));
+              }
+            })
+            .catch((error: unknown) => setShareError(error instanceof Error ? error.message : t('skillsPage.deleteFailed', { defaultValue: 'Failed to delete skill' })));
+        }}
+      >
+        <Trash2 className="h-4 w-4" />
+      </Button>
+    );
   };
 
   const uploadPanel = (
@@ -576,6 +658,25 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
         </div>
       </div>
 
+      {projectOptions.length > 0 && (
+        <label className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+          <span>{t('skillsScope.label', { defaultValue: 'Skills for' })}</span>
+          <select
+            value={activeScope}
+            onChange={(event) => setSelectedScope(event.target.value)}
+            aria-label={t('skillsScope.label', { defaultValue: 'Skills for' })}
+            className="h-9 max-w-full touch-manipulation rounded-lg border border-input bg-card px-2.5 text-sm text-foreground focus:border-primary focus:ring-1 focus:ring-primary"
+          >
+            <option value={GLOBAL_SCOPE}>{t('skillsScope.global', { defaultValue: 'Global' })}</option>
+            {projectOptions.map((project) => (
+              <option key={project.projectId} value={project.projectId}>
+                {t('skillsScope.project', { defaultValue: 'Project: {{name}}', name: project.displayName || project.projectId })}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
       <div className="space-y-2">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <div className="relative min-w-0 flex-1 sm:max-w-md">
@@ -654,6 +755,9 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
                 <div className="mt-1 text-sm text-muted-foreground">
                   {t('skillsPage.addDialogDescription')}
                 </div>
+                <div className="mt-1 text-xs font-medium text-foreground">
+                  {t('skillsScope.addingTo', { defaultValue: 'Adding to: {{scope}}', scope: activeScopeLabel })}
+                </div>
               </div>
               <Button
                 type="button"
@@ -725,7 +829,14 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
       </Dialog>
 
       {isSharedOpen && (
-        <CentralSkillsModal central={central} onClose={() => setIsSharedOpen(false)} onChanged={reloadSkills} />
+        <CentralSkillsModal
+          central={central}
+          scopeLabel={activeScopeLabel}
+          storePath={storePath}
+          isProject={Boolean(activeProjectId)}
+          onClose={() => setIsSharedOpen(false)}
+          onChanged={reloadSkills}
+        />
       )}
 
       {shareError && !isAddDialogOpen && (
@@ -793,9 +904,12 @@ export default function ProviderSkills({ selectedProvider, currentProjects }: Pr
                   key={`${skill.command}:${skill.sourcePath}:${skill.projectPath || 'global'}`}
                   className="min-w-0 rounded-lg border border-border bg-card/50 p-4"
                 >
-                  <div className="min-w-0 space-y-1">
-                    <div className="break-all font-mono text-sm font-semibold text-foreground">{skill.command}</div>
-                    <div className="text-sm text-muted-foreground">{skill.name}</div>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 space-y-1">
+                      <div className="break-all font-mono text-sm font-semibold text-foreground">{skill.command}</div>
+                      <div className="text-sm text-muted-foreground">{skill.name}</div>
+                    </div>
+                    {renderDeleteAction(skill)}
                   </div>
 
                   <p className="mt-3 text-sm leading-relaxed text-muted-foreground">

@@ -11,6 +11,12 @@ import type { CentralSkillsState } from '@/modules/skills/hooks/useCentralSkills
 
 type CentralSkillsModalProps = {
   central: CentralSkillsState;
+  /** Name of the scope being managed: "Global", or the project's name. */
+  scopeLabel: string;
+  /** Where this scope's shared skills live, e.g. `~/.agents/skills` or `<project>/.agents/skills`. */
+  storePath: string;
+  /** True for a project scope, whose links are relative so they survive committing and moving the project. */
+  isProject: boolean;
   onClose: () => void;
   /** Called after a change, so the provider's own skill list can refresh. */
   onChanged: () => Promise<void>;
@@ -26,8 +32,15 @@ const STATE_CLASSES: Record<CentralSkillState, string> = {
   unlinked: 'text-muted-foreground',
 };
 
-/** Rendered by ProviderSkills to manage skills kept in one shared folder and linked into each provider. */
-export default function CentralSkillsModal({ central, onClose, onChanged }: CentralSkillsModalProps) {
+/** Rendered by ProviderSkills to manage the skills kept in one scope's shared folder (the user's, or one project's) and linked into each provider. */
+export default function CentralSkillsModal({
+  central,
+  scopeLabel,
+  storePath,
+  isProject,
+  onClose,
+  onChanged,
+}: CentralSkillsModalProps) {
   const { t } = useTranslation('settings');
   // Last operation problem to show; cleared by the next action.
   const [message, setMessage] = useState<string | null>(null);
@@ -57,7 +70,9 @@ export default function CentralSkillsModal({ central, onClose, onChanged }: Cent
     <div data-escape-layer className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 p-4">
       <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-border bg-background">
         <div className="flex items-center justify-between border-b border-border p-4">
-          <h3 className="text-lg font-medium text-foreground">{t('skillsShared.title', { defaultValue: 'Shared skills' })}</h3>
+          <h3 className="text-lg font-medium text-foreground">
+            {t('skillsShared.titleForScope', { defaultValue: 'Shared skills: {{scope}}', scope: scopeLabel })}
+          </h3>
           <Button variant="ghost" size="sm" onClick={onClose}>
             <X className="h-4 w-4" />
           </Button>
@@ -65,8 +80,13 @@ export default function CentralSkillsModal({ central, onClose, onChanged }: Cent
 
         <div className="space-y-3 overflow-y-auto p-4">
           <p className="text-sm text-muted-foreground">
-            {t('skillsShared.description', { defaultValue: 'Shared skills live in ~/.agents/skills and are linked into each provider’s skills folder, so an edit shows up everywhere. Use "Add to shared folder" when adding a skill, or "Share" on an existing one.' })}
+            {t('skillsShared.descriptionForScope', { defaultValue: 'Shared skills live in {{path}} and are linked into each provider’s skills folder, so an edit shows up everywhere. Providers marked "Reads shared folder" use it directly. Use "Add to shared folder" when adding a skill, or "Share" on an existing one.', path: storePath })}
           </p>
+          {isProject && (
+            <p className="text-xs text-muted-foreground">
+              {t('skillsShared.projectLinksNote', { defaultValue: 'Links inside a project are relative, so they keep working if the project is moved or cloned with them committed.' })}
+            </p>
+          )}
 
           {(message || central.error) && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-900/20 dark:text-amber-200">

@@ -70,4 +70,13 @@ export class CodexSkillsProvider extends SkillsProvider {
       commandPrefix: '$',
     };
   }
+
+  // A project's own `.agents/skills` is also its shared store: Codex reads it directly.
+  protected async getProjectSkillSource(workspacePath: string): Promise<ProviderSkillSource> {
+    return {
+      scope: 'project',
+      rootDir: path.join(workspacePath, '.agents', 'skills'),
+      commandPrefix: '$',
+    };
+  }
 }

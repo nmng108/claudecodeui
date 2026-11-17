@@ -768,6 +768,19 @@ export type ProviderSkillRemoveInput = {
 };
 
 /**
+ * Where a skill write or link applies: the user's own folders (`~/.<provider>/skills`
+ * and the shared `~/.agents/skills`), or one registered project's folders
+ * (`<project>/.<provider>/skills` and the project's `.agents/skills`).
+ *
+ * A project target is always built from a project the app has registered:
+ * `workspacePath` is read from the database by `projectId`, never taken from a
+ * request, so a write cannot be aimed at an arbitrary folder.
+ */
+export type SkillScopeTarget =
+  | { scope: 'user' }
+  | { scope: 'project'; projectId: string; workspacePath: string };
+
+/**
  * Normalized skill record returned by provider skill adapters.
  *
  * The `command` value is the exact invocation text the selected provider expects
@@ -851,6 +864,18 @@ export type CentralSkill = {
   description: string;
   sourcePath: string;
   providers: CentralSkillProviderStatus[];
+};
+
+/**
+ * How one provider relates to the shared skills folder of a scope, independent of
+ * any skill: `native` providers read the folder themselves (nothing to link),
+ * `linkable` ones have their own folder there that shared skills can be linked
+ * into. A provider that is neither has no skills folder in that scope.
+ */
+export type CentralScopeProvider = {
+  provider: LLMProvider;
+  native: boolean;
+  linkable: boolean;
 };
 
 /** Outcome of linking, unlinking or re-applying a central skill for one provider. */

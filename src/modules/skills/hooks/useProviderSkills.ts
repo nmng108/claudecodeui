@@ -5,6 +5,8 @@ import type { ProviderSkill, ProviderSkillCreateEntryPayload, SkillsProject, Ski
 
 type ProviderSkillCreatePayload = {
   entries: ProviderSkillCreateEntryPayload[];
+  /** Project whose skills folder receives the entries; left out, they go to the user's folder. */
+  projectId?: string;
 };
 
 type ProviderSkillsResponse = {
@@ -136,6 +138,7 @@ const normalizeSkill = (
     projectPath: shouldAttachProject
       ? project?.path ?? skill.projectPath
       : skill.projectPath,
+    projectId: shouldAttachProject ? project?.projectId : undefined,
   };
 };
 
@@ -332,6 +335,19 @@ export function useProviderSkills({ selectedProvider, currentProjects }: UseProv
     }
   }, [refreshSkills, selectedProvider]);
 
+  // Deletes one skill folder from the user's skills folder, or from a project's.
+  const removeSkill = useCallback(async (directoryName: string, projectId?: string): Promise<boolean> => {
+    const response = await api.providers.deleteSkill(selectedProvider, directoryName, { projectId });
+    const data = await toResponseJson<ApiResponse<{ removed: boolean }>>(response);
+    clearProviderSkillCache(selectedProvider);
+    if (!response.ok || !data.success) {
+      throw new Error(getApiErrorMessage(data, 'Failed to delete skill'));
+    }
+
+    await refreshSkills({ force: true });
+    return data.data.removed;
+  }, [refreshSkills, selectedProvider]);
+
   // Called after a change made through the shared skills dialog: links change what every
   // provider lists, so all cached lists are dropped before the visible one is re-read.
   const reloadSkills = useCallback(async () => {
@@ -367,6 +383,7 @@ export function useProviderSkills({ selectedProvider, currentProjects }: UseProv
     loadError,
     saveStatus,
     addSkills,
+    removeSkill,
     refreshSkills,
     reloadSkills,
   };

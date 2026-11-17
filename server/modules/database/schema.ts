@@ -308,14 +308,17 @@ CREATE TABLE IF NOT EXISTS mcp_central_targets (
  * A row means the app made (and may remove) the entry `<provider skills dir>/<skill_name>`.
  * Symlinks and junctions are recognised on disk, so rows matter most for `copy`,
  * which cannot be told apart from a user's own folder without this record.
+ * `scope_key` says whose skills folders the row is about: `user` for the home
+ * folders, or a project id for that project's folders.
  */
 export const SKILL_CENTRAL_LINKS_TABLE_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS skill_central_links (
+    scope_key TEXT NOT NULL DEFAULT 'user',
     skill_name TEXT NOT NULL,
     provider TEXT NOT NULL CHECK (provider IN ('claude', 'cursor', 'codex', 'opencode', 'kiro')),
     mode TEXT NOT NULL CHECK (mode IN ('symlink', 'junction', 'copy')),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (skill_name, provider)
+    PRIMARY KEY (scope_key, skill_name, provider)
 );
 `;
 
