@@ -1,8 +1,9 @@
-import { AlertCircle, Check, ChevronDown, Download, GitBranch, Plus, RefreshCw, RotateCcw, Search, Upload, X } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { AlertCircle, ChevronDown, Download, GitBranch, Plus, RefreshCw, RotateCcw, Upload, X } from 'lucide-react';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type { ConfirmationRequest, GitRemoteStatus } from '@/shared/types';
+import GitPickerList from '@/modules/git-panel/GitPickerList';
 import NewBranchModal from '@/modules/git-panel/modals/NewBranchModal';
 
 type GitPanelHeaderProps = {
@@ -61,26 +62,25 @@ export default function GitPanelHeader({
   const { t } = useTranslation();
   const [showBranchDropdown, setShowBranchDropdown] = useState(false);
   const [showNewBranchModal, setShowNewBranchModal] = useState(false);
-  const [branchSearchQuery, setBranchSearchQuery] = useState('');
   const dropdownRef = useRef<HTMLDivElement | null>(null);
-  const branchSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const branchTriggerRef = useRef<HTMLButtonElement | null>(null);
+  // True while a branch switch is running, so a second Enter or click cannot
+  // start another checkout before the first one answers.
+  const isSwitchingBranchRef = useRef(false);
 
-  // Focus the search box on open; drop any stale query on close.
-  useEffect(() => {
-    if (showBranchDropdown) {
-      branchSearchInputRef.current?.focus();
-    } else {
-      setBranchSearchQuery('');
-    }
-  }, [showBranchDropdown]);
+  // Keyboard users keep their place: closing from inside the list returns to the trigger.
+  const closeBranchDropdownAndFocusTrigger = () => {
+    setShowBranchDropdown(false);
+    branchTriggerRef.current?.focus();
+  };
 
-  const filteredBranches = useMemo(() => {
-    const query = branchSearchQuery.trim().toLowerCase();
-    if (!query) {
-      return branches;
+  // Arrow-Down on the closed trigger opens the list, as on a native select.
+  const handleBranchTriggerKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === 'ArrowDown' && !showBranchDropdown) {
+      event.preventDefault();
+      setShowBranchDropdown(true);
     }
-    return branches.filter((branch) => branch.toLowerCase().includes(query));
-  }, [branches, branchSearchQuery]);
+  };
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -131,11 +131,15 @@ export default function GitPanelHeader({
   };
 
   const handleSwitchBranch = async (branchName: string) => {
+    if (isSwitchingBranchRef.current) return;
+    isSwitchingBranchRef.current = true;
     try {
       const success = await onSwitchBranch(branchName);
-      if (success) setShowBranchDropdown(false);
+      if (success) closeBranchDropdownAndFocusTrigger();
     } catch (error) {
       console.error('[GitPanelHeader] Failed to switch branch:', error);
+    } finally {
+      isSwitchingBranchRef.current = false;
     }
   };
 
@@ -146,7 +150,12 @@ export default function GitPanelHeader({
         {/* Branch selector */}
         <div className="relative" ref={dropdownRef}>
           <button
+            ref={branchTriggerRef}
+            type="button"
             onClick={() => setShowBranchDropdown((prev) => !prev)}
+            onKeyDown={handleBranchTriggerKeyDown}
+            aria-haspopup="listbox"
+            aria-expanded={showBranchDropdown}
             className={`flex items-center rounded-lg transition-colors hover:bg-accent ${isMobile ? 'space-x-1 px-2 py-1' : 'space-x-2 px-3 py-1.5'}`}
           >
             <GitBranch className={`text-muted-foreground ${isMobile ? 'h-3 w-3' : 'h-4 w-4'}`} />
@@ -175,58 +184,34 @@ export default function GitPanelHeader({
 
           {showBranchDropdown && (
             <div className="absolute left-0 top-full z-50 mt-1 w-64 overflow-hidden rounded-xl border border-border bg-card shadow-lg">
-              <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-                <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <input
-                  ref={branchSearchInputRef}
-                  type="text"
-                  value={branchSearchQuery}
-                  onChange={(event) => setBranchSearchQuery(event.target.value)}
-                  placeholder={t('git:header.searchBranches')}
-                  className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground focus:outline-none"
-                />
-                {branchSearchQuery && (
+              <GitPickerList
+                items={branches.map((branch) => ({
+                  id: branch,
+                  label: branch,
+                  isCurrent: branch === currentBranch,
+                }))}
+                searchPlaceholder={t('git:header.searchBranches')}
+                showSearch
+                clearSearchLabel={t('git:header.clearSearch')}
+                emptyText={t('git:header.noMatchingBranches')}
+                listClassName="max-h-64"
+                onSelectItem={(branch) => void handleSwitchBranch(branch)}
+                onClose={closeBranchDropdownAndFocusTrigger}
+              >
+                <div className="border-t border-border py-1">
                   <button
-                    onClick={() => setBranchSearchQuery('')}
-                    className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
-                    title={t('git:header.clearSearch')}
+                    type="button"
+                    onClick={() => {
+                      setShowNewBranchModal(true);
+                      setShowBranchDropdown(false);
+                    }}
+                    className="flex w-full items-center space-x-2 px-4 py-2 text-left text-sm transition-colors hover:bg-accent"
                   >
-                    <X className="h-3.5 w-3.5" />
+                    <Plus className="h-3 w-3" />
+                    <span>{t('git:header.createNewBranch')}</span>
                   </button>
-                )}
-              </div>
-              <div className="max-h-64 overflow-y-auto py-1">
-                {filteredBranches.length === 0 ? (
-                  <div className="px-4 py-3 text-center text-sm text-muted-foreground">{t('git:header.noMatchingBranches')}</div>
-                ) : (
-                  filteredBranches.map((branch) => (
-                    <button
-                      key={branch}
-                      onClick={() => void handleSwitchBranch(branch)}
-                      className={`w-full px-4 py-2 text-left text-sm transition-colors hover:bg-accent ${
-                        branch === currentBranch ? 'bg-accent/50 text-foreground' : 'text-muted-foreground'
-                      }`}
-                    >
-                      <span className="flex items-center space-x-2">
-                        {branch === currentBranch && <Check className="h-3 w-3 text-primary" />}
-                        <span className={branch === currentBranch ? 'font-medium' : ''}>{branch}</span>
-                      </span>
-                    </button>
-                  ))
-                )}
-              </div>
-              <div className="border-t border-border py-1">
-                <button
-                  onClick={() => {
-                    setShowNewBranchModal(true);
-                    setShowBranchDropdown(false);
-                  }}
-                  className="flex w-full items-center space-x-2 px-4 py-2 text-left text-sm transition-colors hover:bg-accent"
-                >
-                  <Plus className="h-3 w-3" />
-                  <span>{t('git:header.createNewBranch')}</span>
-                </button>
-              </div>
+                </div>
+              </GitPickerList>
             </div>
           )}
         </div>
