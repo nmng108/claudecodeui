@@ -40,6 +40,10 @@ export default defineConfig(({ mode }) => {
       // Bind mounts from Windows/macOS into a container (docker-compose.dev.yml)
       // do not deliver file-change events; polling is the opt-in workaround.
       watch: env.VITE_USE_POLLING === 'true' ? { usePolling: true, interval: 300 } : undefined,
+      // VITE_HMR=false stops Vite from pushing updates to the open page, so editing
+      // frontend code neither hot-swaps modules nor reloads the browser. The file
+      // watcher keeps running, so a manual refresh still serves the latest code.
+      hmr: env.VITE_HMR === 'false' ? false : undefined,
       proxy: {
         '/api': `http://${proxyHost}:${serverPort}`,
         '/ws': {

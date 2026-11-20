@@ -278,7 +278,7 @@ docker compose --env-file .env.compose -f docker-compose.dev.yml up --build
 
 The container sets `WORKSPACES_ROOT=/workspace`, so workspaces added in the UI must be paths under `/workspace`. Compose variables live in `.env.compose`, not `.env`: the app reads a `.env` at the repository root, and the dev container sees that file through its bind mount. `.env.compose` is git-ignored; export `COMPOSE_ENV_FILES=.env.compose` to skip the `--env-file` flag. The same file also works for the standard stack (`docker compose --env-file .env.compose up --build`).
 
-- UI with HMR: **http://localhost:5173** (Vite). API and WebSocket server: http://localhost:3001.
+- UI: **http://localhost:5173** (Vite). By default the open page is not updated or reloaded when frontend code changes (`VITE_HMR=false`); refresh the browser to see edits, or set `VITE_HMR=true` for live HMR. API and WebSocket server: http://localhost:3001.
 - `npm run server:dev-watch` (restarts the API on server changes) and `npm run client` (Vite) run under `concurrently`.
 - `node_modules` lives in the `dev-node-modules` volume, built inside the container for Linux/glibc; the host's `node_modules` is shadowed and never used. `docker/dev/dev-entrypoint.mjs` runs `npm install` on the first start and whenever `package.json` or `package-lock.json` change, and restores `package-lock.json` if npm rewrote it.
 - npm's download cache is the `dev-npm-cache` volume, so recreating the container (`down` then `up`) does not download packages again. A new or changed dependency is installed on top of the existing `node_modules`; only deleting the volumes (`down -v`) causes a full install.
@@ -290,7 +290,8 @@ Variables for `docker-compose.dev.yml` (see `.env.compose.example`):
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `WORKSPACE_PATH` | `./` | Host folder mounted at `/workspace` for the projects you open in the UI |
-| `VITE_USE_POLLING` | `false` | Set `true` if host edits do not reload the page (bind mounts from Windows/macOS may not deliver file-change events) |
+| `VITE_USE_POLLING` | `false` | Set `true` if host edits are not picked up (bind mounts from Windows/macOS may not deliver file-change events) |
+| `VITE_HMR` | `false` | `false`: frontend edits do not update or reload the open page; refresh manually. `true`: Vite HMR pushes updates live |
 | `DEV_UI_PORT` / `DEV_SERVER_PORT` | `5173` / `3001` | Host ports |
 | `AGENT_UID` / `AGENT_GID` | `1000` / `1000` | uid/gid of the container user. Set to your host user's (`id -u`, `id -g`) so the container can write to the bind-mounted repository. A change needs a rebuild and fresh `dev-*` volumes |
 | `CLOUDCLI_KIRO_ENGINE` | `v3` | Kiro CLI engine used by CloudCLI (`v3` or `v2`) |

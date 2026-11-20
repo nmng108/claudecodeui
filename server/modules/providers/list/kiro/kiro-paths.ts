@@ -103,6 +103,20 @@ export async function readKiroSessionJson(sessionDir: string): Promise<KiroSessi
   }
 }
 
+const KIRO_SUB_SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+
+/**
+ * Absolute path of a subagent's own transcript, or `null` when the id is not
+ * safe to use as a file name. Kiro keeps what a subagent did in
+ * `<sessionDir>/sub-executions/<subSessionId>.jsonl`, not in `messages.jsonl`.
+ * Used by kiro-sessions.provider to rebuild a subagent card's timeline.
+ */
+export function getKiroSubExecutionPath(sessionDir: string, subSessionId: string): string | null {
+  return KIRO_SUB_SESSION_ID_PATTERN.test(subSessionId)
+    ? path.join(sessionDir, 'sub-executions', `${subSessionId}.jsonl`)
+    : null;
+}
+
 /** Absolute path of the transcript inside a session directory. */
 export function getKiroMessagesPath(sessionDir: string): string {
   return path.join(sessionDir, 'messages.jsonl');

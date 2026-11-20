@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import test from 'node:test';
 
 import {
   KiroSessionsProvider,
   normalizeKiroTranscriptLines,
 } from '@/modules/providers/list/kiro/kiro-sessions.provider.js';
+import { appendFilesInputTag, appendImagesInputTag } from '@/shared/image-attachments.js';
 import {
   kiroMessageLine,
   withKiroHome,
@@ -63,6 +66,97 @@ test('a failed tool result is marked as an error and an orphan result stays visi
   assert.deepEqual(messages[0].toolResult, { content: 'denied', isError: true });
   assert.equal(messages[1].kind, 'tool_result');
   assert.equal(messages[1].toolResult?.content, '{"detail":1}');
+});
+
+test('a subagent spawn becomes one container message with its timeline and result', () => {
+  const subLines = lines(
+    kiroMessageLine('s1', { type: 'steering_inclusion', documents: [] }),
+    kiroMessageLine('s2', { type: 'tool_call', toolCallId: 'c1', toolName: 'execute_bash', args: { command: 'echo hi' } }),
+    kiroMessageLine('s3', { type: 'tool_result', toolCallId: 'c1', content: 'hi', success: true }),
+  );
+  const messages = normalizeKiroTranscriptLines(lines(
+    kiroMessageLine('u', { type: 'user', content: 'delegate' }),
+    kiroMessageLine('invoke_subagent_x-sub-agent-start', {
+      type: 'sub_agent_start', subSessionId: 'sub-1', subAgentName: 'general-task-execution', prompt: 'echo hi', explanation: 'Run echo',
+    }),
+    kiroMessageLine('c1-pending', { type: 'pending_interaction', toolCallId: 'c1' }),
+    kiroMessageLine('invoke_subagent_x-sub-agent-complete', {
+      type: 'sub_agent_complete', subSessionId: 'sub-1', response: 'hi', status: 'success',
+    }),
+  ), SESSION_ID, new Map([['sub-1', subLines]]));
+
+  assert.deepEqual(messages.map((message) => message.kind), ['text', 'tool_use']);
+  const [, spawn] = messages;
+  assert.equal(spawn.toolId, 'invoke_subagent_x');
+  assert.deepEqual(spawn.toolInput, { subagent_type: 'general-task-execution', description: 'Run echo', prompt: 'echo hi' });
+  assert.deepEqual(spawn.toolResult, { content: 'hi', isError: false });
+  assert.equal(spawn.subagent?.id, 'sub-1');
+  assert.equal(spawn.subagent?.status, 'completed');
+  assert.equal(spawn.subagent?.activityCount, 1);
+  assert.deepEqual(
+    spawn.subagentTools?.map((entry) => [entry.kind, entry.toolName, entry.toolResult?.content]),
+    [['tool', 'execute_bash', 'hi']],
+  );
+});
+
+test('a subagent is running until its turn ends, then stopped; a failed one is failed', () => {
+  const start = (id: string, sub: string) => kiroMessageLine(`${id}-sub-agent-start`, {
+    type: 'sub_agent_start', subSessionId: sub, subAgentName: 'a', prompt: 'p',
+  });
+  const live = normalizeKiroTranscriptLines(lines(start('i1', 'sub-1')), SESSION_ID);
+  assert.equal(live[0].subagent?.status, 'running');
+
+  const ended = normalizeKiroTranscriptLines(lines(
+    start('i1', 'sub-1'),
+    kiroMessageLine('te', { type: 'turn_end' }),
+    start('i2', 'sub-2'),
+    kiroMessageLine('i2-sub-agent-complete', { type: 'sub_agent_complete', subSessionId: 'sub-2', response: 'boom', status: 'error' }),
+  ), SESSION_ID);
+  assert.equal(ended[0].subagent?.status, 'stopped');
+  assert.equal(ended[1].subagent?.status, 'failed');
+  assert.deepEqual(ended[1].toolResult, { content: 'boom', isError: true });
+});
+
+test('fetchHistory loads the sub-execution file of a spawned subagent', async () => {
+  await withKiroHome(async (homeDir) => {
+    const sessionDir = await writeKiroSession(homeDir, {
+      id: SESSION_ID,
+      workspacePath: WORKSPACE,
+      messages: [
+        kiroMessageLine('i-sub-agent-start', { type: 'sub_agent_start', subSessionId: 'sub-1', subAgentName: 'a', prompt: 'p' }),
+        kiroMessageLine('i-sub-agent-complete', { type: 'sub_agent_complete', subSessionId: 'sub-1', response: 'done', status: 'success' }),
+      ],
+    });
+    await mkdir(path.join(sessionDir, 'sub-executions'));
+    await writeFile(
+      path.join(sessionDir, 'sub-executions', 'sub-1.jsonl'),
+      `${JSON.stringify(kiroMessageLine('x', { type: 'assistant', content: 'working on it' }))}\n`,
+    );
+
+    const history = await new KiroSessionsProvider().fetchHistory(SESSION_ID);
+    assert.equal(history.messages.length, 1);
+    assert.equal(history.messages[0].subagentTools?.[0]?.content, 'working on it');
+  });
+});
+
+test('attachment blocks are stripped from user turns and restored as images and files', () => {
+  const prompt = appendFilesInputTag(
+    appendImagesInputTag('Look at this', [{ path: '/home/agent/.cloudcli/assets/a.png', name: 'image.png' }]),
+    [{ path: '/home/agent/.cloudcli/assets/b.pdf', name: 'b.pdf' }],
+  );
+  const imageOnly = appendImagesInputTag('', [{ path: '/home/agent/.cloudcli/assets/c.png' }]);
+  const messages = normalizeKiroTranscriptLines(lines(
+    kiroMessageLine('u1', { type: 'user', content: prompt }),
+    kiroMessageLine('u2', { type: 'user', content: imageOnly }),
+  ), SESSION_ID);
+
+  assert.equal(messages.length, 2);
+  assert.equal(messages[0].content, 'Look at this');
+  assert.deepEqual(messages[0].images, [{ path: '/home/agent/.cloudcli/assets/a.png', name: 'image.png' }]);
+  assert.deepEqual(messages[0].files, [{ path: '/home/agent/.cloudcli/assets/b.pdf', name: 'b.pdf' }]);
+  assert.equal(messages[1].content, '');
+  assert.deepEqual(messages[1].images, [{ path: '/home/agent/.cloudcli/assets/c.png' }]);
+  assert.equal(messages[1].files, undefined);
 });
 
 test('blank, malformed and half-written lines are skipped without throwing', () => {

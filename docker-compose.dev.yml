@@ -1,7 +1,8 @@
-# Development stack: runs the source in this repository with hot reload.
+# Development stack: runs the source in this repository. The server restarts on
+# changes; the UI does not auto-reload (refresh manually, or set VITE_HMR=true).
 #   cp .env.compose.example .env.compose        (once; holds ports, keys, paths)
 #   docker compose --env-file .env.compose -f docker-compose.dev.yml up --build
-# UI (Vite, HMR): http://localhost:5173   API/WebSocket server: http://localhost:3001
+# UI (Vite): http://localhost:5173   API/WebSocket server: http://localhost:3001
 # For the published-package image use docker-compose.yml instead.
 # To give the agents Docker, enable a docker profile: --profile docker (docs/docker-in-docker.md).
 services:
@@ -27,6 +28,9 @@ services:
       # Set to true when edits on the host do not trigger a reload (bind mounts
       # from Windows or macOS do not always deliver file-change events).
       VITE_USE_POLLING: ${VITE_USE_POLLING:-false}
+      # false (default): editing frontend code does not update or reload the open
+      # page; refresh the browser to see changes. true: Vite HMR pushes updates.
+      VITE_HMR: ${VITE_HMR:-false}
       KIRO_API_KEY: ${KIRO_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # git over SSH uses the key held by the dev-ssh-agent service.
