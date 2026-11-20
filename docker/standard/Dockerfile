@@ -132,7 +132,7 @@ WORKDIR /home/agent
 ENV PATH="/home/agent/.local/bin:${PATH}"
 # Pinned to the release this integration was built and tested on (the
 # installer's default moves to newer major versions).
-ARG KIRO_CLI_VERSION=2.37.1
+ARG KIRO_CLI_VERSION=3.4.0
 RUN curl -fsSL https://cli.kiro.dev/install | bash -s -- --version "${KIRO_CLI_VERSION}" && \
     kiro-cli --version && \
     claude --version && \

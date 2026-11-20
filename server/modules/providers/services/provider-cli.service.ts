@@ -1,5 +1,6 @@
 import spawn from 'cross-spawn';
 
+import { resolveKiroCliCommand } from '@/modules/providers/list/kiro/kiro-acp.client.js';
 import { providerRegistry } from '@/modules/providers/provider.registry.js';
 import { sessionsService } from '@/modules/providers/services/sessions.service.js';
 import { resolveClaudeCodeExecutablePath } from '@/shared/claude-cli-path.js';
@@ -14,6 +15,11 @@ const LATEST_VERSION_FAILURE_TTL_MS = 5 * 60 * 1000;
 /** The registry gets this long; past it the settings page shows the installed version alone. */
 const LATEST_VERSION_TIMEOUT_MS = 4000;
 const NPM_REGISTRY_URL = 'https://registry.npmjs.org';
+/**
+ * The stable channel manifest `kiro-cli update` reads. Kiro CLI is not on npm;
+ * the manifest's `version` is the release the updater would install.
+ */
+const KIRO_RELEASE_MANIFEST_URL = 'https://prod.download.cli.kiro.dev/stable/latest/manifest.json';
 
 /** One update run may take this long: `claude update` downloads a ~250 MB binary. */
 const UPDATE_TIMEOUT_MS = 10 * 60 * 1000;
@@ -34,10 +40,15 @@ const RELEASE_VERSION_PATTERN = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+
 type CliUpdater = {
   /** The CLI chats run, or undefined when they run a binary that ships inside CloudCLI's dependencies. */
   resolveCommand: () => string | undefined;
-  /** Arguments that make the CLI update itself. */
-  args: string[];
+  /**
+   * Arguments that make the CLI update itself. A function receives the version
+   * the CLI reports now (null when unknown), for updaters whose flags differ between releases.
+   */
+  args: string[] | ((installedVersion: string | null) => string[]);
   /** The npm package whose `latest` dist-tag is the newest release, or null when the CLI is not on npm. */
   npmPackage: string | null;
+  /** A JSON document whose `version` is the newest release, for a CLI that is not on npm. */
+  releaseManifestUrl?: string;
 };
 
 // Each CLI updates itself with its own updater. That updater knows how it was
@@ -63,6 +74,14 @@ const CLI_UPDATERS: Partial<Record<LLMProvider, CliUpdater>> = {
     args: ['upgrade'],
     npmPackage: 'opencode-ai',
   },
+  kiro: {
+    // Honors KIRO_CLI_PATH, like the chat, sign-in and Shell tab do.
+    resolveCommand: resolveKiroCliCommand,
+    // 2.x asks for confirmation unless told not to; 3.x dropped the flag and does not ask.
+    args: (installedVersion) => (readMajorVersion(installedVersion) === 2 ? ['update', '-y'] : ['update']),
+    npmPackage: null,
+    releaseManifestUrl: KIRO_RELEASE_MANIFEST_URL,
+  },
 };
 
 /** Why the settings page offers no update: the CLI ships with CloudCLI, or the hosting platform manages the CLIs. */
@@ -87,7 +106,7 @@ type ProviderCliStatus = {
   provider: LLMProvider;
   installed: boolean;
   installedVersion: string | null;
-  /** The registry's `latest` release, or null when the CLI is not on npm or the lookup failed. */
+  /** The newest release (npm `latest`, or Kiro's release manifest), or null when there is no source or the lookup failed. */
   latestVersion: string | null;
   updateAvailable: boolean;
   /** What the update action runs, e.g. `claude update`; null when it is unavailable. */
@@ -167,6 +186,12 @@ function isNewerVersion(candidate: string, current: string): boolean {
   }
 
   return !next[4] && Boolean(installed[4]);
+}
+
+/** The major version of a `major.minor.patch` string, or null when it is not one. */
+function readMajorVersion(version: string | null): number | null {
+  const match = version ? RELEASE_VERSION_PATTERN.exec(version) : null;
+  return match ? Number(match[1]) : null;
 }
 
 /** Renders the updater as a user would type it, for display only; it is spawned without a shell. */
@@ -323,8 +348,10 @@ export function createProviderCliService(dependencyOverrides: Partial<ProviderCl
   const updatesInProgress = new Map<LLMProvider, UpdateInProgress>();
   const lastUpdateResults = new Map<LLMProvider, ProviderCliUpdateResult>();
 
-  const fetchLatestVersion = async (npmPackage: string): Promise<string | null> => {
-    const response = await dependencies.fetch(`${NPM_REGISTRY_URL}/${npmPackage.replace('/', '%2F')}/latest`, {
+  /** The npm registry's `latest` manifest for a package, or the release manifest at a URL. */
+  const fetchLatestVersion = async (source: string): Promise<string | null> => {
+    const url = /^https?:\/\//.test(source) ? source : `${NPM_REGISTRY_URL}/${source.replace('/', '%2F')}/latest`;
+    const response = await dependencies.fetch(url, {
       headers: { accept: 'application/json' },
       signal: AbortSignal.timeout(dependencies.latestVersionTimeoutMs),
     });
@@ -337,32 +364,39 @@ export function createProviderCliService(dependencyOverrides: Partial<ProviderCl
   };
 
   /** Never throws: an unreachable registry only means no "update available" hint. */
-  const getLatestVersion = (npmPackage: string): Promise<string | null> => {
-    const cached = latestVersionCache.get(npmPackage);
+  const getLatestVersion = (source: string): Promise<string | null> => {
+    const cached = latestVersionCache.get(source);
     if (cached && cached.expiresAt > dependencies.now()) {
       return Promise.resolve(cached.version);
     }
 
     // Concurrent page loads share one request instead of each asking the registry.
-    let lookup = latestVersionLookups.get(npmPackage);
+    let lookup = latestVersionLookups.get(source);
     if (!lookup) {
-      lookup = fetchLatestVersion(npmPackage)
+      lookup = fetchLatestVersion(source)
         .catch(() => null)
         .then((version) => {
           const ttl = version ? LATEST_VERSION_TTL_MS : LATEST_VERSION_FAILURE_TTL_MS;
-          latestVersionCache.set(npmPackage, { version, expiresAt: dependencies.now() + ttl });
+          latestVersionCache.set(source, { version, expiresAt: dependencies.now() + ttl });
           return version;
         })
-        .finally(() => latestVersionLookups.delete(npmPackage));
-      latestVersionLookups.set(npmPackage, lookup);
+        .finally(() => latestVersionLookups.delete(source));
+      latestVersionLookups.set(source, lookup);
     }
     return lookup;
   };
 
-  const resolveUpdateCommand = (provider: LLMProvider): { command: string; args: string[] } | null => {
+  const resolveUpdateCommand = (
+    provider: LLMProvider,
+    installedVersion: string | null,
+  ): { command: string; args: string[] } | null => {
     const updater = CLI_UPDATERS[provider];
     const command = updater?.resolveCommand();
-    return updater && command ? { command, args: updater.args } : null;
+    if (!updater || !command) {
+      return null;
+    }
+    const args = typeof updater.args === 'function' ? updater.args(installedVersion) : updater.args;
+    return { command, args };
   };
 
   const runUpdate = async (
@@ -401,16 +435,16 @@ export function createProviderCliService(dependencyOverrides: Partial<ProviderCl
       // and the updater may be replacing that binary right then.
       const running = updatesInProgress.get(provider.id);
       let { installed, version: installedVersion } = running?.before ?? provider.auth.checkInstalled();
-      const update = resolveUpdateCommand(provider.id);
+      const update = resolveUpdateCommand(provider.id, installedVersion);
       const updateUnavailableReason: CliUpdateUnavailableReason | null = dependencies.platformMode
         ? 'platform'
         : update ? null : 'bundled';
 
       // The registry is only worth asking when the answer can lead to an update
       // of a CLI that is there.
-      const npmPackage = CLI_UPDATERS[provider.id]?.npmPackage;
-      const latestVersion = installed && updateUnavailableReason === null && npmPackage
-        ? await getLatestVersion(npmPackage)
+      const latestVersionSource = CLI_UPDATERS[provider.id]?.npmPackage ?? CLI_UPDATERS[provider.id]?.releaseManifestUrl;
+      const latestVersion = installed && updateUnavailableReason === null && latestVersionSource
+        ? await getLatestVersion(latestVersionSource)
         : null;
 
       // Read after the registry lookup, so a run that started meanwhile counts.
@@ -450,8 +484,7 @@ export function createProviderCliService(dependencyOverrides: Partial<ProviderCl
       }
 
       const provider = dependencies.resolveProvider(providerName);
-      const update = resolveUpdateCommand(provider.id);
-      if (!update) {
+      if (!resolveUpdateCommand(provider.id, null)) {
         throw new AppError(`${getProviderLabel(provider.id)} ships with CloudCLI and is updated together with it.`, {
           code: 'PROVIDER_CLI_UPDATE_UNAVAILABLE',
           statusCode: 400,
@@ -483,6 +516,14 @@ export function createProviderCliService(dependencyOverrides: Partial<ProviderCl
         throw new AppError(`${getProviderLabel(provider.id)} is not installed on the server, so there is nothing to update.`, {
           code: 'PROVIDER_CLI_NOT_INSTALLED',
           statusCode: 409,
+        });
+      }
+      // Resolved with the version just probed, for updaters whose arguments depend on it.
+      const update = resolveUpdateCommand(provider.id, before.version);
+      if (!update) {
+        throw new AppError(`${getProviderLabel(provider.id)} ships with CloudCLI and is updated together with it.`, {
+          code: 'PROVIDER_CLI_UPDATE_UNAVAILABLE',
+          statusCode: 400,
         });
       }
 

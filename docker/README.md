@@ -261,7 +261,9 @@ For the development stack there are shortcuts: `make up-d-docker` and `make down
 
 This starts a `dind` (`dev-dind`) service: a **private** Docker daemon (not your host's), reached over TLS. The default profile `docker` is **rootless** (the daemon runs as an unprivileged user, no `privileged` flag); `--profile docker-privileged` is a fallback for hosts where that does not start. Either way, anything that can run Docker commands gets significant reach: read [docs/docker-in-docker.md](../docs/docker-in-docker.md) first. The workspace is mounted at `/workspace` in both containers, so bind mounts work. Containers the agents publish on `7080-7089` (`DIND_PORTS`) are reachable at `http://localhost:8080` (this machine only), and from the app container at `http://dind:8080`.
 ### Kiro CLI version
-The images install Kiro CLI 2.37.1 (`KIRO_CLI_VERSION` build argument). The installer's default moves to newer major versions (it is now 3.0.0), so the version is pinned to the release this integration was tested on.
+The images install Kiro CLI 3.4.0 (`KIRO_CLI_VERSION` build argument). The installer's default moves to newer releases, so the version is pinned to the release this integration was tested on.
+
+Rebuilding is not needed to move to a newer Kiro CLI: Settings → Agents → Kiro shows the installed and newest version and an **Update** button, which runs `kiro-cli update` (`kiro-cli update -y` on 2.x) inside the container. The binary lives in `/home/agent/.local/bin`, which is not a volume, so after the container is recreated the image's pinned version is back; rebuild with a newer `KIRO_CLI_VERSION` to make an update permanent. A newer release than the one this integration was tested on is not guaranteed to work.
 
 ### Health & readiness
 

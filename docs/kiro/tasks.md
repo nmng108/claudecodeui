@@ -266,3 +266,16 @@ Kiro's own "Allow read" alone (reads but not edits) has no separate entry; Accep
 
 `kiro-permission-choices.ts` builds the patterns (exact, subcommand, command, folder, entire tool; no wildcard for `sudo`/`env` wrappers, assignments or shell syntax) and checks the user's selection. The UI sends a choice id and a scope, never a pattern, and the runtime ignores anything it did not offer.
 
+
+### Kiro CLI 3.4.0 and in-app updates (2026-11-20)
+
+**Upgrade 2.37.1 to 3.4.0.** The image pin (`KIRO_CLI_VERSION`) is now 3.4.0. Checked against the real 3.4.0 binary, with no change needed in the integration:
+
+- `kiro-cli acp --agent-engine=v3` initializes and advertises `_kiro/session/context` and `_kiro/session/compact`; `session/new` returns `configOptions` (`model`, `mode`), which `parseKiroModelCatalog` already reads. One prompt turn streamed through `KiroAcpClient`.
+- `kiro-cli login --license free --use-device-flow` prints the same `Code:` and `Open this URL:` lines `parseKiroLoginOutput` reads; `whoami --format json` keeps its shape.
+- Sessions are written to `~/.kiro/sessions/<wsHash>/sess_<uuid>/session.json` as before.
+- `kiro-cli --v3` and `--resume-id` (Shell tab) still exist. 3.x is a single `kiro-cli` binary; `kiro-cli-chat` and `kiro-cli-term` are gone.
+- 3.x makes V3 the default engine, so `CLOUDCLI_KIRO_ENGINE=v2` (which passes `--v2` in the Shell tab) is now the opt-out only for the terminal; the ACP client still sends `--agent-engine=v3` explicitly. V2 and V3 keep separate session stores.
+- The first V3 start may rewrite V2-format custom agents in place after saving a `.json.bak` copy (`chat.enableAutoAgentUpgrade`).
+
+**In-app update.** Settings → Agents → Kiro now has the same version row and Update button as Claude. `provider-cli.service.ts` runs `kiro-cli update` (resolved through `KIRO_CLI_PATH`), or `kiro-cli update -y` while the installed version is 2.x: the 2.37 updater asks for confirmation, 3.x has no `-y`. Both were run headless with no TTY against real installs in a throwaway `HOME` (2.37.1 updated to the newest release). The newest release comes from the stable channel manifest `https://prod.download.cli.kiro.dev/stable/latest/manifest.json` (`version`), the same source `kiro-cli update` reads. The update is refused while a Kiro session is running. In Docker the binary is in `~/.local/bin` (not a volume), so a recreated container returns to the image's pinned version.

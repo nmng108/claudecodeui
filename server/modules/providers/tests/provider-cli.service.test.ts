@@ -29,6 +29,7 @@ const pathExtKey = findEnvKey('PATHEXT');
 //   update-new-version written into `version` by a successful update
 //   update-stdout/-stderr, update-exit, update-sleep-ms shape the update run
 //   update-count       incremented on every update run
+//   update-args        the arguments of the last update run, space separated
 //   update-finished    written when an update ran to the end (a killed one never does)
 //   ignore-sigterm     the update run survives SIGTERM, so only SIGKILL stops it
 //   child-sleep-ms     the update run starts a child (its pid in child-pid) that
@@ -51,6 +52,7 @@ if (command === '--version') {
 }
 if (command === 'update' || command === 'upgrade') {
   fs.writeFileSync(path.join(dir, 'update-count'), String(Number(read('update-count', '0')) + 1));
+  fs.writeFileSync(path.join(dir, 'update-args'), process.argv.slice(2).join(' '));
   if (read('ignore-sigterm', '')) {
     process.on('SIGTERM', () => {});
   }
@@ -461,6 +463,76 @@ test('Cursor has no npm release to compare with; Codex ships with CloudCLI; plat
     assert.equal(platformClaude.installedVersion, '2.1.200');
     assert.equal(platformClaude.latestVersion, null);
     assert.equal(platformClaude.updateAvailable, false);
+  });
+});
+
+// ----------------- Kiro ------------
+
+const KIRO_MANIFEST_URL = 'https://prod.download.cli.kiro.dev/stable/latest/manifest.json';
+
+test('Kiro compares with the release manifest of its stable channel', async () => {
+  await withIsolatedCliEnv(async (binDir) => {
+    const kiro = await createFakeCli(binDir, 'kiro-cli');
+    await kiro.set('version', 'kiro-cli 3.4.0\n');
+    const registry = createFakeRegistry(async () => jsonResponse({ version: '3.5.0', packages: [] }));
+
+    const status = await createService({ fetch: registry.fetch }).getCliStatus('kiro');
+    assert.equal(status.installedVersion, '3.4.0');
+    assert.equal(status.latestVersion, '3.5.0');
+    assert.equal(status.updateAvailable, true);
+    assert.equal(status.updateCommand, 'kiro-cli update');
+    assert.equal(status.updateUnavailableReason, null);
+    assert.deepEqual(registry.calls.map((call) => call.url), [KIRO_MANIFEST_URL]);
+  });
+});
+
+test('Kiro answers without an update hint when its release manifest cannot be read', async () => {
+  await withIsolatedCliEnv(async (binDir) => {
+    const kiro = await createFakeCli(binDir, 'kiro-cli');
+    await kiro.set('version', 'kiro-cli 3.4.0\n');
+    const registry = createFakeRegistry(async () => jsonResponse({ nothing: true }));
+
+    const status = await createService({ fetch: registry.fetch }).getCliStatus('kiro');
+    assert.equal(status.installed, true);
+    assert.equal(status.latestVersion, null);
+    assert.equal(status.updateAvailable, false);
+  });
+});
+
+test('updateCli runs `kiro-cli update` on 3.x and `kiro-cli update -y` on 2.x, which asks otherwise', async () => {
+  await withIsolatedCliEnv(async (binDir) => {
+    const kiro = await createFakeCli(binDir, 'kiro-cli');
+    await kiro.set('version', 'kiro-cli 3.4.0\n');
+    await kiro.set('update-new-version', 'kiro-cli 3.5.0\n');
+
+    const fromThree = await createService().updateCli('kiro');
+    assert.equal(fromThree.command, 'kiro-cli update');
+    assert.equal(fromThree.previousVersion, '3.4.0');
+    assert.equal(fromThree.installedVersion, '3.5.0');
+    assert.equal(fromThree.failure, null);
+    assert.equal(await kiro.read('update-args'), 'update');
+
+    await kiro.set('version', 'kiro-cli 2.37.1\n');
+    await kiro.set('update-new-version', 'kiro-cli 3.5.0\n');
+    const fromTwo = await createService().updateCli('kiro');
+    assert.equal(fromTwo.command, 'kiro-cli update -y');
+    assert.equal(fromTwo.previousVersion, '2.37.1');
+    assert.equal(fromTwo.installedVersion, '3.5.0');
+    assert.equal(await kiro.read('update-args'), 'update -y');
+  });
+});
+
+test('updateCli refuses while Kiro is busy in a session', async () => {
+  await withIsolatedCliEnv(async (binDir) => {
+    const kiro = await createFakeCli(binDir, 'kiro-cli');
+    await kiro.set('version', 'kiro-cli 3.4.0\n');
+
+    await rejectsWithAppError(
+      createService({ listBusyProviders: async () => ['kiro'] }).updateCli('kiro'),
+      'PROVIDER_CLI_BUSY',
+      409,
+    );
+    assert.equal(await kiro.read('update-count'), null);
   });
 });
 

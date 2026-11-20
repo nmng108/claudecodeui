@@ -1,3 +1,4 @@
+import { resolveKiroCliCommand } from '@/modules/providers/list/kiro/kiro-acp.client.js';
 import { getKiroApiKeyState } from '@/modules/providers/list/kiro/kiro-api-key.store.js';
 import { getKiroCliLogin, type KiroCliLogin } from '@/modules/providers/list/kiro/kiro-login.service.js';
 import type { IProviderAuth } from '@/shared/interfaces.js';
@@ -6,12 +7,12 @@ import { probeCliVersion } from '@/shared/utils.js';
 
 export class KiroProviderAuth implements IProviderAuth {
   /**
-   * Checks whether `kiro-cli` is available to the server process, and which
+   * Checks whether `kiro-cli` (or the binary `KIRO_CLI_PATH` names) is available to the server process, and which
    * version it is. Like OpenCode's CLI, a clean `--version` exit is required
    * to count as installed.
    */
   checkInstalled(): CliVersionProbe {
-    const probe = probeCliVersion('kiro-cli');
+    const probe = probeCliVersion(resolveKiroCliCommand());
     return { ...probe, installed: probe.exitCode === 0 };
   }
 
