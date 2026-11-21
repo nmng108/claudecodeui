@@ -52,12 +52,29 @@ An agent working in the app container should be able to build images, run contai
   containers, so `docker run -v /workspace/app:/app ...` and compose files with `./src:/app`
   run by an agent find their files. Paths outside the workspace (for example `/app` in the dev
   stack, or `$HOME`) exist only in the app container; the daemon does not see them.
-- **Ports.** Containers an agent starts with `-p 8080:80` are published by the daemon.
-  - From the app container (and the agents): `http://dind:8080`.
-  - From your machine: the daemon service publishes `DIND_PORTS` (default `7080-7089`) **on
-    localhost only** (`127.0.0.1`), so `http://localhost:8080` works and other machines on the
-    network cannot reach it. A port already used on your host makes the service fail to start;
+- **Ports.** Containers an agent starts are published by the daemon, so a host port must be one the
+  daemon service publishes: `DIND_PORTS` (default `7080-7089`).
+  - From the app container (and the agents): `http://dind:<port>`. `localhost` there is the app container.
+  - From your machine: `http://localhost:<port>`. The daemon service publishes only `DIND_PORTS`, on
+    localhost only (`127.0.0.1`), so other machines on the network cannot reach it. A container started
+    with `-p 7081:80` is at `http://localhost:7081`. `-p 8080:80` is reachable from the app container
+    only, not from your machine. A port already used on your host makes the service fail to start;
     change the range in `.env.compose`.
+- **Apps running in the app container.** The app container publishes no port in the `DIND_PORTS`
+  range, so something an agent runs directly in it (from source, a dev server) is not reachable from
+  your machine. The agents are told to use `docker/shared/agent-environment/expose-port.mjs
+  <host port> <app port>`. It starts a small forwarder container (`cloudcli-expose-<host port>`,
+  `alpine/socat`) on the daemon that publishes the host port and relays to the app. The app must
+  listen on `0.0.0.0`. `... stop` removes the forwarder. Alternatively, publish the range on the app
+  service in the compose file, or run the app in a container on the daemon.
+- **What the agents are told.** At every start the app container writes a short note about this setup
+  (own daemon, `dind:<port>`, the `DIND_PORTS` range, bind mounts under `/workspace`) into the global
+  instruction file of each agent CLI: `~/.kiro/steering/cloudcli-docker.md` and a marked block in
+  `~/.claude/CLAUDE.md`, plus `~/.codex/AGENTS.md` if `~/.codex` exists and
+  `~/.config/opencode/AGENTS.md` if that file exists (OpenCode otherwise reads Claude's). Cursor has no
+  global instruction file. Text outside the marked block is never changed. Without Docker configured,
+  or with the daemon off, the note says so. The source is `docker/shared/agent-environment/docker.md`,
+  written by `docker/shared/agent-environment.mjs`.
 - **Limits.** The daemon container has a memory limit (`DIND_MEMORY`, default 6g) and a process
   limit (`DIND_PIDS`, default 4096). Disk use of the data volume is not limited.
 - The app waits for the daemon to be healthy before it starts, if a profile is enabled.

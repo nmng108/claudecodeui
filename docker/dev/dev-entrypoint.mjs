@@ -45,6 +45,9 @@ function installDependencies() {
 // and remove ones that were dropped from the list (see docker/shared/mise-sync.mjs).
 // Read from the repository, so editing either file applies on the next start with
 // no rebuild. A failure (for example no network) never stops the app.
+// Tell the agent CLIs how Docker works here (docker/shared/agent-environment.mjs), also read
+// from the repository.
+spawnSync(process.execPath, ['docker/shared/agent-environment.mjs'], { stdio: 'inherit' });
 spawnSync(process.execPath, ['docker/shared/mise-sync.mjs'], { stdio: 'inherit' });
 const expectedHash = dependenciesHash();
 if (readIfExists(STAMP) !== expectedHash) {

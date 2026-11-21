@@ -262,7 +262,7 @@ docker compose --env-file .env.compose -f docker-compose.dev.yml --profile docke
 
 For the development stack there are shortcuts: `make up-d-docker` and `make down-docker` (`make up-docker` runs in the foreground). **They start the privileged daemon by default**; `make up-d-docker DIND_PROFILE=docker` starts the rootless one, and `make reset-dind-certs` must run when you switch between the two.
 
-This starts a `dind` (`dev-dind`) service: a **private** Docker daemon (not your host's), reached over TLS. The default profile `docker` is **rootless** (the daemon runs as an unprivileged user, no `privileged` flag); `--profile docker-privileged` is a fallback for hosts where that does not start. Either way, anything that can run Docker commands gets significant reach: read [docs/docker-in-docker.md](../docs/docker-in-docker.md) first. The workspace is mounted at `/workspace` in both containers, so bind mounts work. Containers the agents publish on `7080-7089` (`DIND_PORTS`) are reachable at `http://localhost:8080` (this machine only), and from the app container at `http://dind:8080`.
+This starts a `dind` (`dev-dind`) service: a **private** Docker daemon (not your host's), reached over TLS. The default profile `docker` is **rootless** (the daemon runs as an unprivileged user, no `privileged` flag); `--profile docker-privileged` is a fallback for hosts where that does not start. Either way, anything that can run Docker commands gets significant reach: read [docs/docker-in-docker.md](../docs/docker-in-docker.md) first. The workspace is mounted at `/workspace` in both containers, so bind mounts work. Containers the agents publish on a host port in `7080-7089` (`DIND_PORTS`) are reachable at `http://localhost:<port>` (this machine only), and from the app container at `http://dind:<port>`. Other host ports are reachable from the app container only. The agents are told this at start through their global instruction files (see the *What the agents are told* item in the docs).
 ### Kiro CLI version
 The images install Kiro CLI 3.4.0 (`KIRO_CLI_VERSION` build argument). The installer's default moves to newer releases, so the version is pinned to the release this integration was tested on.
 
@@ -300,6 +300,7 @@ Variables for `docker-compose.dev.yml` (see `.env.compose.example`):
 | `DEV_UI_PORT` / `DEV_SERVER_PORT` | `5173` / `3001` | Host ports |
 | `AGENT_UID` / `AGENT_GID` | `1000` / `1000` | uid/gid of the container user. Set to your host user's (`id -u`, `id -g`) so the container can write to the bind-mounted repository. A change needs a rebuild and fresh `dev-*` volumes |
 | `CLOUDCLI_KIRO_ENGINE` | `v3` | Kiro CLI engine used by CloudCLI (`v3` or `v2`) |
+| `CLOUDCLI_PLUGIN_ENV_PASSTHROUGH` | Docker, ssh-agent and (dev) mise variables | Comma-separated host variable names forwarded to plugin servers, which otherwise get only `PATH` and `HOME`. Visible to every plugin, so list non-secret names only |
 | `KIRO_API_KEY`, `ANTHROPIC_API_KEY` | empty | Passed through as in the standard stack |
 
 `tsx watch` has no polling mode, so on a bind mount that does not deliver events, restart the container to pick up server-side changes.

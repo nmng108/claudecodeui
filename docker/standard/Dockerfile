@@ -29,7 +29,12 @@ ARG AGENT_GID=1000
 # - ripgrep: used by Claude Code and agents for search
 # - jq, unzip: used by the Kiro CLI installer
 # - sqlite3: for inspecting the CloudCLI/auth sqlite database
+# - iproute2 (ss, ip), procps (ps, pgrep), netcat-openbsd (nc), lsof: for checking which
+#   ports and processes are up, e.g. a dev server an agent started
 # - tini: proper PID 1 signal handling / zombie reaping for `docker run`
+# - lib* and fonts-*: shared libraries and fonts that Playwright's Chromium
+#   needs (the list is Playwright's own for Debian 12), so `npm run test:e2e`
+#   runs without root.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       bash \
@@ -37,13 +42,42 @@ RUN apt-get update && \
       ca-certificates \
       curl \
       git \
+      iproute2 \
       jq \
+      lsof \
+      netcat-openbsd \
       openssh-client \
+      procps \
       python3 \
       ripgrep \
       sqlite3 \
       tini \
-      unzip && \
+      unzip \
+      libasound2 \
+      libatk-bridge2.0-0 \
+      libatk1.0-0 \
+      libatspi2.0-0 \
+      libcairo2 \
+      libcups2 \
+      libdbus-1-3 \
+      libdrm2 \
+      libgbm1 \
+      libglib2.0-0 \
+      libnspr4 \
+      libnss3 \
+      libpango-1.0-0 \
+      libx11-6 \
+      libxcb1 \
+      libxcomposite1 \
+      libxdamage1 \
+      libxext6 \
+      libxfixes3 \
+      libxkbcommon0 \
+      libxrandr2 \
+      fonts-liberation \
+      fonts-noto-color-emoji \
+      libfontconfig1 \
+      libfreetype6 && \
     rm -rf /var/lib/apt/lists/*
 # ---------------------------------------------------------------------------
 # Claude Code
@@ -99,6 +133,9 @@ COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr
 COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
 COPY mise.toml /etc/mise/config.toml
 COPY shared/mise-sync.mjs /usr/local/lib/cloudcli/mise-sync.mjs
+# Writes the note about this container's Docker setup into the agents' instruction files at start.
+COPY shared/agent-environment.mjs /usr/local/lib/cloudcli/agent-environment.mjs
+COPY shared/agent-environment/ /usr/local/lib/cloudcli/agent-environment/
 # MISE_STATE_DIR is inside the /mise volume so mise's state survives a recreated container.
 ENV MISE_DATA_DIR=/mise \
     MISE_CONFIG_DIR=/mise \
@@ -154,11 +191,17 @@ VOLUME ["/workspace"]
 ENV HOST=0.0.0.0
 ENV SERVER_PORT=3001
 
+# Playwright e2e (npm run test:e2e): use the Chromium that `npx playwright install
+# chromium` downloads; the image has no Google Chrome, which the config would
+# otherwise default to.
+ENV E2E_BROWSER_CHANNEL=""
+
 EXPOSE 3001
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS "http://127.0.0.1:${SERVER_PORT}/health" || exit 1
 
-# mise-sync.mjs installs/prunes the language runtimes in /mise, then starts the CMD.
-ENTRYPOINT ["tini", "--", "node", "/usr/local/lib/cloudcli/mise-sync.mjs", "--"]
+# agent-environment.mjs writes the agents' Docker note, mise-sync.mjs installs/prunes the language
+# runtimes in /mise, then the CMD starts.
+ENTRYPOINT ["tini", "--", "node", "/usr/local/lib/cloudcli/agent-environment.mjs", "--", "node", "/usr/local/lib/cloudcli/mise-sync.mjs", "--"]
 CMD ["cloudcli", "start", "--port", "3001"]

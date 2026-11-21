@@ -31,7 +31,12 @@ ARG AGENT_GID=1000
 # - ripgrep: used by Claude Code and agents for search.
 # - jq, unzip: used by the Kiro CLI installer.
 # - sqlite3: for inspecting the app database.
+# - iproute2 (ss, ip), procps (ps, pgrep), netcat-openbsd (nc), lsof: for checking which
+#   ports and processes are up, e.g. a dev server an agent started.
 # - tini: PID 1 that forwards signals and reaps zombies.
+# - lib* and fonts-*: shared libraries and fonts that Playwright's Chromium
+#   needs (the list is Playwright's own for Debian 12), so `npm run test:e2e`
+#   runs without root.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       bash \
@@ -39,13 +44,42 @@ RUN apt-get update && \
       ca-certificates \
       curl \
       git \
+      iproute2 \
       jq \
+      lsof \
+      netcat-openbsd \
       openssh-client \
+      procps \
       python3 \
       ripgrep \
       sqlite3 \
       tini \
-      unzip && \
+      unzip \
+      libasound2 \
+      libatk-bridge2.0-0 \
+      libatk1.0-0 \
+      libatspi2.0-0 \
+      libcairo2 \
+      libcups2 \
+      libdbus-1-3 \
+      libdrm2 \
+      libgbm1 \
+      libglib2.0-0 \
+      libnspr4 \
+      libnss3 \
+      libpango-1.0-0 \
+      libx11-6 \
+      libxcb1 \
+      libxcomposite1 \
+      libxdamage1 \
+      libxext6 \
+      libxfixes3 \
+      libxkbcommon0 \
+      libxrandr2 \
+      fonts-liberation \
+      fonts-noto-color-emoji \
+      libfontconfig1 \
+      libfreetype6 && \
     rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g @anthropic-ai/claude-code && \
@@ -112,6 +146,10 @@ RUN git config --global --add safe.directory '*'
 # HUSKY=0: the `prepare` script would otherwise write core.hooksPath into the
 # host repository's .git/config through the bind mount.
 ENV HUSKY=0
+# Playwright e2e (npm run test:e2e): use the Chromium that `npx playwright install
+# chromium` downloads; the image has no Google Chrome, which the config would
+# otherwise default to.
+ENV E2E_BROWSER_CHANNEL=""
 # HOST must be 0.0.0.0 for published ports to reach the Vite and API servers.
 ENV HOST=0.0.0.0
 ENV SERVER_PORT=3001

@@ -23,6 +23,13 @@ account or credits are needed and runs are repeatable.
 - The browser is your installed Chrome (`E2E_BROWSER_CHANNEL=chrome`, the
   default). Set `E2E_BROWSER_CHANNEL=` (empty) to use the Chromium that
   `npx playwright install chromium` downloads, or `msedge` for Edge.
+- In the dev and standard Docker images the system libraries Chromium needs are
+  installed and `E2E_BROWSER_CHANNEL` is empty, so the tests use the downloaded
+  Chromium. Run `npx playwright install chromium` once, after rebuilding the
+  image if it predates these libraries. Agents have no root, so a missing
+  library (`libnss3`, `libglib-2.0`, ...) cannot be fixed at run time; add it to
+  the `apt-get install` block in `docker/dev/Dockerfile` and
+  `docker/standard/Dockerfile`.
 
 ## What is covered (`e2e/kiro.spec.ts`)
 
