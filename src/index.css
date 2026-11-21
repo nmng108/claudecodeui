@@ -1013,4 +1013,21 @@
       background-color: transparent;
     }
   }
+
+  /* "Load all messages" pill: visible for most of its life, then fades out. The
+     chat session hook unmounts it on the same 2500ms schedule. */
+  .load-all-overlay-auto-fade {
+    animation: load-all-overlay-auto-fade 2500ms ease forwards;
+  }
+
+  @keyframes load-all-overlay-auto-fade {
+    0%, 80% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .load-all-overlay-auto-fade {
+      animation: none;
+    }
+  }
 }

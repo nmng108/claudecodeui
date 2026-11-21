@@ -32,8 +32,8 @@ const renderHandlers = (initialActivity: SessionActivity | undefined) => {
     setTokenBudget: () => {},
     pendingPermissionRequests: [],
     setPendingPermissionRequests: () => {},
-    streamTimerRef: { current: null },
-    accumulatedStreamRef: { current: '' },
+    streamTimerRef: { current: new Map() },
+    accumulatedStreamRef: { current: new Map() },
     lastSeqRef: { current: new Map() },
     statusCheckSentAtRef: { current: new Map() },
     onSessionProcessing: (sessionId, next) => {

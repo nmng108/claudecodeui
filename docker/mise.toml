@@ -14,6 +14,15 @@
 # When several versions of a tool are listed, the first one is the default;
 # pick another with `mise exec java@temurin-8 -- java -version` or in a
 # project's mise.toml.
+#
+# Every version is pinned exactly, never `latest` or a prefix such as `21`.
+# `latest` is not a version: mise has to ask the network which release is newest
+# each time it resolves it, and then installs that release before running the
+# command, which fails without network access. An exact version resolves from
+# what is installed, so commands run offline once the first start has finished.
+# Updating a tool is optional: change the pin here and rebuild, or run
+# `mise use -g <tool>@<version>` inside the container (that goes to the user
+# config in the /mise volume and overrides this file).
 
 [settings]
 # Use prebuilt binaries; never compile from source (that needs a full
@@ -25,6 +34,9 @@ python.compile = false
 disable_tools = ["node"]
 
 [tools]
-python = "latest"
-java = ["temurin-21", "temurin-8", "temurin-25"]
-maven = "latest"
+python = "3.15.2"
+java = ["temurin-21.0.13+9.0.LTS", "temurin-8.0.512+9", "temurin-25.0.5+8.0.LTS"]
+maven = "3.10.1"
+# Kubernetes client CLIs (no cluster or daemon is bundled).
+kubectl = "1.37.2"
+helm = "4.3.2"

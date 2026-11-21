@@ -99,9 +99,11 @@ COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr
 COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
 COPY mise.toml /etc/mise/config.toml
 COPY shared/mise-sync.mjs /usr/local/lib/cloudcli/mise-sync.mjs
+# MISE_STATE_DIR is inside the /mise volume so mise's state survives a recreated container.
 ENV MISE_DATA_DIR=/mise \
     MISE_CONFIG_DIR=/mise \
     MISE_CACHE_DIR=/mise/cache \
+    MISE_STATE_DIR=/mise/state \
     MISE_YES=1 \
     PATH="/mise/shims:${PATH}"
 # git over SSH:
@@ -116,7 +118,8 @@ RUN userdel -r node 2>/dev/null || true; \
     groupadd -g "${AGENT_GID}" agent && \
     useradd -m -u "${AGENT_UID}" -g agent -d /home/agent -s /bin/bash agent && \
     mkdir -p /workspace /mise /home/agent/.claude /home/agent/.kiro /home/agent/.cloudcli \
-        /home/agent/.local/share/kiro-cli /home/agent/.ssh /home/agent/.m2 && \
+        /home/agent/.local/share/kiro-cli /home/agent/.ssh /home/agent/.m2 \
+        /home/agent/.claude-code-ui && \
     chmod 700 /home/agent/.ssh && \
     chown -R agent:agent /workspace /mise /home/agent
 

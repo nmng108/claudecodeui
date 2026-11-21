@@ -158,96 +158,142 @@ function readSortTime(message: NormalizedMessage, replacementFloor: number): num
 }
 
 /**
- * Count how many user turns precede `message` in a chronologically merged view
- * of server + realtime rows. Used to match a realtime row to the correct turn
- * on disk when several turns share identical assistant text.
+ * Shortest live thought that may match as a fragment of the persisted thinking.
+ * Shorter thoughts ("Let me check") appear inside unrelated longer ones, so
+ * they must equal a persisted thought to count as echoed.
  */
-function getUserTurnOrdinalBefore(
-  message: NormalizedMessage,
+const MIN_THINKING_FRAGMENT_LENGTH = 40;
+
+/** Collapses runs of whitespace so the same thought compares equal however its line breaks were stored. */
+function normalizeThinkingText(text: string | undefined): string {
+  return (text || '').replace(/\s+/g, ' ').trim();
+}
+
+type TurnThinking = {
+  /** Each persisted thinking row of the turn, normalized. */
+  rows: string[];
+  /** All of them joined, because one live thought can be stored as several rows. */
+  joined: string;
+};
+
+/**
+ * Answers "which server turn does this realtime row belong to" for a whole
+ * prune pass. The merged order is sorted once and every turn's persisted
+ * rows are collected once, so each lookup is O(1) instead of re-sorting all
+ * rows per live row.
+ */
+type TurnLookup = {
+  /** Ordinal of the user turn a row belongs to, matching its place in the merged order. */
+  turnOrdinalOf: (message: NormalizedMessage) => number;
+  /** Persisted assistant text of a server turn, trimmed. Empty when the turn is not on the server. */
+  assistantTextsOf: (turnOrdinal: number) => Set<string>;
+  /** Persisted thinking of a server turn, or null when the turn is not on the server. */
+  thinkingOf: (turnOrdinal: number) => TurnThinking | null;
+};
+
+function buildTurnLookup(
   serverMessages: NormalizedMessage[],
   realtimeMessages: NormalizedMessage[],
-): number {
-  const messageTime = readMessageTime(message);
+): TurnLookup {
+  // Ordinal per id: user rows seen before the id's first position in the
+  // chronological merge, minus the row's own turn start.
+  const ordinalById = new Map<string, number>();
   let userCount = 0;
-
   for (const candidate of [...serverMessages, ...realtimeMessages].sort(compareMessagesChronologically)) {
-    if (candidate.id === message.id) {
-      break;
+    if (!ordinalById.has(candidate.id)) {
+      ordinalById.set(candidate.id, Math.max(0, userCount - 1));
     }
-
-    const candidateTime = readMessageTime(candidate);
-    if (
-      messageTime !== null
-      && candidateTime !== null
-      && candidateTime > messageTime
-    ) {
-      break;
-    }
-
     if (candidate.kind === 'text' && candidate.role === 'user') {
       userCount++;
     }
   }
 
-  return Math.max(0, userCount - 1);
-}
-
-function findServerTurnRangeByOrdinal(
-  serverMessages: NormalizedMessage[],
-  turnOrdinal: number,
-): { start: number; end: number } | null {
-  let userCount = -1;
-  let start = -1;
-
+  // [start, end) of the rows after each server user message.
+  const turnBounds: Array<{ start: number; end: number }> = [];
   for (let index = 0; index < serverMessages.length; index++) {
-    const message = serverMessages[index];
-    if (message.kind === 'text' && message.role === 'user') {
-      userCount++;
-      if (userCount === turnOrdinal) {
-        start = index;
-        break;
+    const row = serverMessages[index];
+    if (row.kind === 'text' && row.role === 'user') {
+      const previous = turnBounds[turnBounds.length - 1];
+      if (previous) previous.end = index;
+      turnBounds.push({ start: index + 1, end: serverMessages.length });
+    }
+  }
+
+  const assistantCache = new Map<number, Set<string>>();
+  const thinkingCache = new Map<number, TurnThinking | null>();
+
+  return {
+    turnOrdinalOf: (message) => ordinalById.get(message.id) ?? 0,
+    assistantTextsOf: (turnOrdinal) => {
+      let texts = assistantCache.get(turnOrdinal);
+      if (!texts) {
+        texts = new Set();
+        const bounds = turnBounds[turnOrdinal];
+        if (bounds) {
+          for (const row of serverMessages.slice(bounds.start, bounds.end)) {
+            if (row.kind === 'text' && row.role === 'assistant') {
+              texts.add((row.content || '').trim());
+            }
+          }
+        }
+        assistantCache.set(turnOrdinal, texts);
       }
-    }
-  }
-
-  if (start < 0) {
-    return null;
-  }
-
-  let end = serverMessages.length;
-  for (let index = start + 1; index < serverMessages.length; index++) {
-    if (serverMessages[index].kind === 'text' && serverMessages[index].role === 'user') {
-      end = index;
-      break;
-    }
-  }
-
-  return { start, end };
+      return texts;
+    },
+    thinkingOf: (turnOrdinal) => {
+      if (thinkingCache.has(turnOrdinal)) return thinkingCache.get(turnOrdinal) ?? null;
+      const bounds = turnBounds[turnOrdinal];
+      let thinking: TurnThinking | null = null;
+      if (bounds) {
+        const rows = serverMessages
+          .slice(bounds.start, bounds.end)
+          .filter((row) => row.kind === 'thinking')
+          .map((row) => normalizeThinkingText(row.content));
+        thinking = { rows, joined: normalizeThinkingText(rows.join(' ')) };
+      }
+      thinkingCache.set(turnOrdinal, thinking);
+      return thinking;
+    },
+  };
 }
 
 function isAssistantTextEchoedInSameTurnOnServer(
   message: NormalizedMessage,
-  serverMessages: NormalizedMessage[],
-  realtimeMessages: NormalizedMessage[],
+  lookup: TurnLookup,
 ): boolean {
   const assistantText = (message.content || '').trim();
   if (!assistantText) {
     return false;
   }
+  return lookup.assistantTextsOf(lookup.turnOrdinalOf(message)).has(assistantText);
+}
 
-  const turnOrdinal = getUserTurnOrdinalBefore(message, serverMessages, realtimeMessages);
-  const turnRange = findServerTurnRangeByOrdinal(serverMessages, turnOrdinal);
-  if (!turnRange) {
+/**
+ * A live `thinking` row carries a random id, so it can never match the
+ * persisted copy of the same thought by id. It is the persisted copy when the
+ * same turn on the server holds that thought: equal to one persisted row or to
+ * all of them joined, or, for a thought long enough not to match by accident,
+ * contained in the joined text. Like the text rule above, this is deliberately
+ * conservative: a thought the transcript does not hold yet (indexing lags
+ * right after `complete`) stays visible.
+ */
+function isThinkingEchoedInSameTurnOnServer(
+  message: NormalizedMessage,
+  lookup: TurnLookup,
+): boolean {
+  const thought = normalizeThinkingText(message.content);
+  if (!thought) {
     return false;
   }
 
-  return serverMessages
-    .slice(turnRange.start + 1, turnRange.end)
-    .some((serverMessage) =>
-      serverMessage.kind === 'text'
-      && serverMessage.role === 'assistant'
-      && (serverMessage.content || '').trim() === assistantText,
-    );
+  const persisted = lookup.thinkingOf(lookup.turnOrdinalOf(message));
+  if (!persisted) {
+    return false;
+  }
+  if (persisted.joined === thought || persisted.rows.includes(thought)) {
+    return true;
+  }
+  return thought.length >= MIN_THINKING_FRAGMENT_LENGTH && persisted.joined.includes(thought);
 }
 
 /**
@@ -303,6 +349,9 @@ function pruneRealtimeSupersededByServer(
 
   const serverIds = new Set(serverMessages.map((message) => message.id));
   const reconciledRealtimeMessages = removeOptimisticUserEchoes(serverMessages, realtimeMessages);
+  // Built on first use and shared by every row of this pass.
+  let turnLookup: TurnLookup | null = null;
+  const getTurnLookup = () => (turnLookup ??= buildTurnLookup(serverMessages, realtimeMessages));
 
   return reconciledRealtimeMessages.filter((message) => {
     if (serverIds.has(message.id)) {
@@ -310,14 +359,14 @@ function pruneRealtimeSupersededByServer(
     }
 
     if (message.kind === 'stream_delta' || message.id === `__streaming_${message.sessionId}`) {
-      if (isAssistantTextEchoedInSameTurnOnServer(message, serverMessages, realtimeMessages)) {
+      if (isAssistantTextEchoedInSameTurnOnServer(message, getTurnLookup())) {
         return false;
       }
       return true;
     }
 
     if (message.kind === 'text' && message.role === 'assistant') {
-      if (isAssistantTextEchoedInSameTurnOnServer(message, serverMessages, realtimeMessages)) {
+      if (isAssistantTextEchoedInSameTurnOnServer(message, getTurnLookup())) {
         return false;
       }
       return true;
@@ -325,6 +374,10 @@ function pruneRealtimeSupersededByServer(
 
     if (message.kind === 'text' && message.role === 'user') {
       return true;
+    }
+
+    if (message.kind === 'thinking') {
+      return !isThinkingEchoedInSameTurnOnServer(message, getTurnLookup());
     }
 
     if (message.kind === 'tool_use' && message.toolId) {

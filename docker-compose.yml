@@ -34,6 +34,8 @@ services:
       # Kiro CLI's sign-in (browser login) and the engine it downloads on first use.
       - kiro-data:/home/agent/.local/share/kiro-cli
       - cloudcli-home:/home/agent/.cloudcli
+      # CloudCLI plugins: cloned repos with their node_modules/build output, and plugins.json.
+      - cloudcli-plugins:/home/agent/.claude-code-ui
       # Sockets of the ssh-agent service: git over SSH authenticates through them.
       - ssh-run:/run/ssh
       # Client certificate for the optional Docker daemon (empty unless a docker profile is on).
@@ -183,6 +185,7 @@ volumes:
   kiro-home:
   kiro-data:
   cloudcli-home:
+  cloudcli-plugins:
   ssh-keys:
   ssh-run:
   mise-data:

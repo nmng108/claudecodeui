@@ -83,8 +83,9 @@ function ChatInterface({
   } = useSessionProtectionActions();
 
   const sessionStore = useSessionStore();
-  const streamTimerRef = useRef<number | null>(null);
-  const accumulatedStreamRef = useRef('');
+  // Streaming buffers and flush timers, keyed by session id (see useChatRealtimeHandlers).
+  const streamTimerRef = useRef(new Map<string, number>());
+  const accumulatedStreamRef = useRef(new Map<string, string>());
   // When each session's `chat.subscribe` was last sent; idle acks older than
   // a later local request are discarded as stale.
   const statusCheckSentAtRef = useRef(new Map<string, number>());
@@ -92,14 +93,6 @@ function ChatInterface({
   // on every sequenced frame, read whenever a `chat.subscribe` is sent so the
   // server replays only the events this client actually missed.
   const lastSeqRef = useRef(new Map<string, number>());
-
-  const resetStreamingState = useCallback(() => {
-    if (streamTimerRef.current) {
-      clearTimeout(streamTimerRef.current);
-      streamTimerRef.current = null;
-    }
-    accumulatedStreamRef.current = '';
-  }, []);
 
   const {
     provider,
@@ -171,7 +164,6 @@ function ChatInterface({
     newSessionTrigger,
     processingSessions,
     onSessionIdle,
-    resetStreamingState,
     statusCheckSentAtRef,
     lastSeqRef,
     sessionStore,
@@ -328,31 +320,16 @@ function ChatInterface({
 
   usePaletteOpsRegister({ insertComposerText });
 
+  // Timers must not outlive the pane; their buffers go with the refs.
   useEffect(() => {
-    if (!canAbortSession) {
-      return;
-    }
-
-    const handleGlobalEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.repeat || event.defaultPrevented) {
-        return;
-      }
-
-      event.preventDefault();
-      handleAbortSession();
-    };
-
-    document.addEventListener('keydown', handleGlobalEscape, { capture: true });
+    const timers = streamTimerRef.current;
+    const buffers = accumulatedStreamRef.current;
     return () => {
-      document.removeEventListener('keydown', handleGlobalEscape, { capture: true });
+      timers.forEach((timer) => clearTimeout(timer));
+      timers.clear();
+      buffers.clear();
     };
-  }, [canAbortSession, handleAbortSession]);
-
-  useEffect(() => {
-    return () => {
-      resetStreamingState();
-    };
-  }, [resetStreamingState]);
+  }, []);
 
   /**
    * Branches the conversation into a new session that ends at this message,

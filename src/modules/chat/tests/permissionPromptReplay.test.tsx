@@ -33,8 +33,8 @@ const renderHandlers = () => {
     setPendingPermissionRequests: (next) => {
       pending = typeof next === 'function' ? next(pending) : next;
     },
-    streamTimerRef: { current: null },
-    accumulatedStreamRef: { current: '' },
+    streamTimerRef: { current: new Map() },
+    accumulatedStreamRef: { current: new Map() },
     lastSeqRef: { current: new Map() },
     statusCheckSentAtRef: { current: new Map() },
     requestLatestMessages: async () => {},

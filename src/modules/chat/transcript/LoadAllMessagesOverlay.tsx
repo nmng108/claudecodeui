@@ -1,18 +1,5 @@
 import { useTranslation } from 'react-i18next';
 
-const loadAllOverlayAnimationStyle = `
-@keyframes loadAllOverlayAutoFade {
-  0%, 80% { opacity: 1; }
-  100% { opacity: 0; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .load-all-overlay-auto-fade {
-    animation: none !important;
-  }
-}
-`;
-
 type LoadAllMessagesOverlayProps = {
   showLoadAllOverlay: boolean;
   isLoadingAllMessages: boolean;
@@ -41,9 +28,7 @@ export default function LoadAllMessagesOverlay({
   return (
     <div
       className={`pointer-events-none sticky top-2 z-20 flex justify-center ${!isLoadingAllMessages ? 'load-all-overlay-auto-fade' : ''}`}
-      style={!isLoadingAllMessages ? { animation: 'loadAllOverlayAutoFade 2500ms ease forwards' } : undefined}
     >
-      <style>{loadAllOverlayAnimationStyle}</style>
       {loadAllJustFinished ? (
         <div className="flex items-center space-x-2 rounded-full bg-green-600 px-4 py-1.5 text-xs font-medium text-white shadow-lg dark:bg-green-500">
           <svg className="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -58,10 +58,11 @@ it.
    from them. `complete` triggers a REST refresh of the persisted tail; the live copy of
    the reply survives until the persisted copy demonstrably supersedes it. Details in
    [the message store](./04-message-store-and-lazy-loading.md).
-8. **The delta buffer belongs to the chat pane, not to a session.** There is one
-   `accumulatedStreamRef` and one `streamTimerRef` for the whole `ChatInterface`. Two
-   sessions streaming at once share them. This is a real limitation, not a subtlety —
-   see [Cross-session behaviour](#cross-session-behaviour).
+8. **The delta buffer is per session.** `accumulatedStreamRef` and `streamTimerRef` on
+   `ChatInterface` are `Map`s keyed by session id. A reply streams into its own buffer and
+   its own `__streaming_<sessionId>` row whether or not that session is on screen, so two
+   sessions can stream at once and a session switch has nothing to clean up — see
+   [Cross-session behaviour](#cross-session-behaviour).
 
 ## The pieces
 
@@ -69,10 +70,10 @@ it.
 | --- | --- |
 | `src/shared/context/WebSocketContext.tsx` | The one socket. Parses each frame and calls every registered listener synchronously. Synthesises the client-only `websocket_reconnected` frame on a re-open, and retries a dropped socket after 3 s. |
 | `src/modules/chat/hooks/useChatRealtimeHandlers.ts` | The whole client-side protocol. One switch on `kind`; the streaming buffer; the `seq` bookkeeping. |
-| `src/modules/chat/ChatInterface.tsx` | Owns the four refs the handler mutates — `accumulatedStreamRef`, `streamTimerRef`, `lastSeqRef`, `statusCheckSentAtRef` — and clears the first two on unmount. |
+| `src/modules/chat/ChatInterface.tsx` | Owns the four refs the handler mutates — `accumulatedStreamRef`, `streamTimerRef`, `lastSeqRef`, `statusCheckSentAtRef`, all `Map`s keyed by session id — and clears the first two on unmount. |
 | `src/modules/chat/hooks/useSessionStore.ts` | Per-session slots. `appendRealtime`, `updateStreaming`, `finalizeStreaming`, `truncateAt`, and the merge of live and persisted rows. |
 | `src/modules/chat/hooks/useChatMessages.ts` | `normalizedToChatMessages` — the projection from store records to UI objects. Pairs `tool_use` with `tool_result`, folds subagent rows into their container, and memoises through a `WeakMap`. |
-| `src/modules/chat/hooks/useChatSessionState.ts` | Sends `chat.subscribe` on session open and on reconnect, owns `requestLatestMessages` and `resetStreamingState`, and memoises `chatMessages`. |
+| `src/modules/chat/hooks/useChatSessionState.ts` | Sends `chat.subscribe` on session open and on reconnect, owns `requestLatestMessages`, and memoises `chatMessages`. |
 | `src/modules/chat/hooks/useChatComposerState.ts` | The outbound side: `chat.send`, `chat.edit-send`, `chat.abort`, `chat.permission-response`, plus the optimistic user echo. |
 | `src/shared/hooks/useSessionProtection.ts` | The per-session activity map that the indicator and the abort button derive from. |
 | `src/modules/chat/transcript/StreamingMarkdown.tsx` | Renders an assistant reply, streaming or finished, as a settled half plus a pending half. |
@@ -236,7 +237,7 @@ emitted in buffer order.
 A provider that streams emits deltas far faster than a transcript can usefully re-render.
 The handler's answer is a leading-edge-armed, trailing-edge-fired timer:
 
-- The **first** delta appends to `accumulatedStreamRef` and arms a 100 ms `setTimeout`.
+- The **first** delta of a session appends to that session's entry in `accumulatedStreamRef` and arms that session's 100 ms `setTimeout`.
 - Every delta inside that window only appends to the ref. The timer is not re-armed and
   not extended.
 - When it fires, it clears itself and calls `updateStreaming(sid, wholeAccumulatedText)`.
@@ -398,24 +399,25 @@ kinds are among the five that are never persisted as rows. The rules:
 
 ## Cross-session behaviour
 
-The store is session-keyed and correct for any number of sessions. The streaming buffer is
-not, and this is the sharpest edge in the subsystem.
+The store and the streaming buffer are both session-keyed, so any number of sessions can
+stream at once.
 
-`accumulatedStreamRef` and `streamTimerRef` are single refs on `ChatInterface`. When a
-delta arrives:
+`accumulatedStreamRef` and `streamTimerRef` are `Map`s on `ChatInterface`. When a delta
+arrives:
 
-- It is appended to that one ref, **whatever session it belongs to.**
-- The timer, if not already armed, is armed with a closure over *that* frame's session id.
-  The flush writes the ref's entire contents to *that* session.
-- Additionally, if the frame's session is **not** the one on screen, the raw delta is
-  appended to that session's slot as its own row.
+- It is appended to **that session's** buffer, whatever session is on screen.
+- That session's timer, if not armed, is armed. The flush writes the buffer to that
+  session's `__streaming_<sessionId>` row, replacing it in place.
+- The raw delta is never stored as a row of its own.
 
-So two sessions streaming at once share one buffer, and the background session's prose can
-be published into the foreground session's placeholder. Nothing repairs this except a
-session switch, which calls `resetStreamingState` and clears both refs. The background
-session, meanwhile, accumulates one store row per delta rather than one coalesced row;
-those rows only disappear on a server refresh whose persisted assistant text matches them
-exactly, and they count against the 500-row realtime cap.
+`stream_end` and `complete` publish and finalize **one session's** buffer and leave the
+others alone. A session switch changes only `activeSessionIdRef`; a background reply keeps
+growing in its own row, and the row is whole when the session is opened again.
+
+This replaced a single shared buffer. Under it, a delta for a background session was also
+appended as its own store row, so returning to a streaming session showed the reply as a
+pile of word-sized fragments, and a switch (which cleared the shared buffer) made the next
+flush overwrite the row with only the text that arrived after it.
 
 Everything else is per-session and behaves: `lastSeqRef` and `statusCheckSentAtRef` are
 `Map`s keyed by session id, the busy map is keyed by session id, the token counter is
@@ -488,10 +490,10 @@ question rendered twice in another.
 | `finalizeStreaming` | It must keep the array position and must not append. `messageStreamEnd.test.tsx` covers the DOM-identity half; the duplicate-bubble half is covered by the store's dedupe. |
 | The `shouldPersist` filter | Adding a kind to it makes that kind renderable, which means `normalizedToChatMessages` needs a case for it or it silently disappears. |
 | Anything in `splitStreamingMarkdown` | `streamingMarkdown.test.ts` for the boundary rules and `streamingMarkdownRenderEquivalence.test.tsx` for split-equals-unsplit on every prefix. Both must pass on the fenced and list fixtures. |
-| A provider's `normalizeMessage` | The kind table above. Adding `stream_delta` to a provider that had none makes the shared buffer and the missing `stream_end` suddenly matter for it. |
+| A provider's `normalizeMessage` | The kind table above. Adding `stream_delta` to a provider that had none makes the per-session buffer and the missing `stream_end` suddenly matter for it. |
 | `decorateAndRecordEvent` or `seq` assignment | Reconnect replay is `seq > lastSeq` with no gap detection, and `lastSeqRef` only moves forward. Any non-monotonic `seq` silently loses events. |
 | The `status` branch | Both arms. The `token_budget` arm is scoped to the viewed session on purpose, and the other arm currently has no producer — a new producer will start writing status text into the activity map for the first time. |
-| Session-switch cleanup in `useChatSessionState` | `resetStreamingState` is the only thing that unwinds a shared buffer mid-stream. Removing that call re-introduces cross-session text bleed. |
+| Anything that stores a `stream_delta` frame directly | A raw delta is one row per chunk and is only ever shown as a pile of fragments. Deltas go through the per-session buffer and `updateStreaming`; `streamingPerSessionBuffer.test.tsx` pins it. |
 
 Related: [the websocket layer](./01-websocket-transport.md) for the transport and the replay
 contract, [the message store](./04-message-store-and-lazy-loading.md) for what happens to

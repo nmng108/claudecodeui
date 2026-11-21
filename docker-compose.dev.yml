@@ -57,6 +57,8 @@ services:
       # Kiro CLI's sign-in (browser login) and the engine it downloads on first use.
       - dev-kiro-data:/home/agent/.local/share/kiro-cli
       - dev-cloudcli-home:/home/agent/.cloudcli
+      # CloudCLI plugins: cloned repos with their node_modules/build output, and plugins.json.
+      - dev-cloudcli-plugins:/home/agent/.claude-code-ui
       # Sockets of the dev-ssh-agent service: git over SSH authenticates through them.
       - dev-ssh-run:/run/ssh
       # Client certificate for the optional Docker daemon (empty unless a docker profile is on).
@@ -208,6 +210,7 @@ volumes:
   dev-kiro-home:
   dev-kiro-data:
   dev-cloudcli-home:
+  dev-cloudcli-plugins:
   dev-ssh-keys:
   dev-ssh-run:
   dev-mise-data:

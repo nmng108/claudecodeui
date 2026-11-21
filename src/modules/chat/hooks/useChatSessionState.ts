@@ -99,7 +99,6 @@ type UseChatSessionStateArgs = {
   newSessionTrigger?: number;
   processingSessions?: SessionActivityMap;
   onSessionIdle?: MarkSessionIdle;
-  resetStreamingState: () => void;
   /** When each session's `chat.subscribe` was last sent; guards stale idle acks. */
   statusCheckSentAtRef: MutableRefObject<Map<string, number>>;
   /** Highest live seq observed per session; sent as `lastSeq` on subscribe. */
@@ -199,7 +198,6 @@ export function useChatSessionState({
   newSessionTrigger,
   processingSessions,
   onSessionIdle,
-  resetStreamingState,
   statusCheckSentAtRef,
   lastSeqRef,
   sessionStore,
@@ -281,7 +279,6 @@ export function useChatSessionState({
      * - No dependence on route/tab/session-object identity changes.
      * - No coupling to unrelated external update signals.
      */
-    resetStreamingState();
     setCurrentSessionId(null);
     setPendingUserMessage(null);
     messagesOffsetRef.current = 0;
@@ -311,7 +308,7 @@ export function useChatSessionState({
       clearTimeout(loadAllFinishedTimerRef.current);
       loadAllFinishedTimerRef.current = null;
     }
-  }, [newSessionTrigger, onSessionIdle, resetStreamingState]);
+  }, [newSessionTrigger, onSessionIdle]);
 
   /* ---------------------------------------------------------------- */
   /*  Derive processing state for the viewed session                  */
@@ -708,7 +705,6 @@ export function useChatSessionState({
         return;
       }
 
-      resetStreamingState();
       setCurrentSessionId(null);
       messagesOffsetRef.current = 0;
       setHasMoreMessages(false);
@@ -741,8 +737,32 @@ export function useChatSessionState({
     }
 
     const sessionChanged = currentSessionId !== null && currentSessionId !== selectedSessionId;
-    if (sessionChanged) {
-      resetStreamingState();
+
+    // Returning to a session whose slot is still warm (the store keeps slots
+    // for as long as the workspace lives) must not refetch only the newest
+    // page over it. That throws away the older pages already held and leaves
+    // the live rows of the earlier visit next to freshly fetched copies of the
+    // same turns. Restore the view from the slot and reconcile the tail.
+    const warmSlot = existingSlot?.fetchedAt && existingSlot.status !== 'loading' ? existingSlot : null;
+    if (warmSlot) {
+      messagesOffsetRef.current = warmSlot.offset;
+      setHasMoreMessages(warmSlot.hasMore);
+      setTotalMessages(warmSlot.total);
+      setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES);
+      setAllMessagesLoaded(!warmSlot.hasMore);
+      allMessagesLoadedRef.current = !warmSlot.hasMore;
+      setIsLoadingAllMessages(false);
+      setLoadAllJustFinished(false);
+      setShowLoadAllOverlay(false);
+      wasNearTopRef.current = false;
+      if (loadAllOverlayTimerRef.current) clearTimeout(loadAllOverlayTimerRef.current);
+      if (loadAllFinishedTimerRef.current) clearTimeout(loadAllFinishedTimerRef.current);
+      setTokenBudget((warmSlot.tokenUsage as Record<string, unknown> | null | undefined) ?? null);
+      setCurrentSessionId(selectedSessionId);
+      lastLoadedSessionKeyRef.current = sessionKey;
+      setIsLoadingSessionMessages(false);
+      void requestLatestMessages(selectedSessionId);
+      return;
     }
 
     // Reset pagination/scroll state
@@ -791,7 +811,6 @@ export function useChatSessionState({
     });
   }, [
     isActive,
-    resetStreamingState,
     requestLatestMessages,
     selectedProject,
     selectedSession?.id,
@@ -1053,7 +1072,9 @@ export function useChatSessionState({
         ),
       });
 
-      if (currentSessionId !== requestSessionId) return;
+      // The view may have moved to another session while the request was in
+      // flight; its result belongs to the session that asked for it.
+      if (activeSessionIdRef.current !== requestSessionId) return;
 
       if (slot) {
         if (scrollRestoreState) {
@@ -1079,13 +1100,27 @@ export function useChatSessionState({
       }
     } catch (error) {
       console.error('Error loading all messages:', error);
-      allMessagesLoadedRef.current = false;
-      setShowLoadAllOverlay(false);
+      if (activeSessionIdRef.current === requestSessionId) {
+        allMessagesLoadedRef.current = false;
+        setShowLoadAllOverlay(false);
+      }
     } finally {
       isLoadingMoreRef.current = false;
-      setIsLoadingAllMessages(false);
+      if (activeSessionIdRef.current === requestSessionId) {
+        setIsLoadingAllMessages(false);
+      }
     }
-  }, [isActive, selectedSession, selectedProject, isLoadingAllMessages, currentSessionId, sessionStore]);
+  }, [isActive, selectedSession, selectedProject, isLoadingAllMessages, sessionStore]);
+
+  // The pill offers "load all", so it has nothing to show once there is
+  // nothing left to load. A fade that already ran to opacity 0 would otherwise
+  // leave an invisible, still-mounted overlay behind when a timer was cleared
+  // by another transition.
+  useEffect(() => {
+    if (showLoadAllOverlay && !hasMoreMessages && !isLoadingAllMessages && !loadAllJustFinished) {
+      setShowLoadAllOverlay(false);
+    }
+  }, [hasMoreMessages, isLoadingAllMessages, loadAllJustFinished, showLoadAllOverlay]);
 
   /**
    * Fetches the whole transcript into the store and returns it, without
