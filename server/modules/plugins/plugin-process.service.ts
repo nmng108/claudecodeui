@@ -11,6 +11,11 @@ const runningPlugins = new Map();
 // Map<pluginName, Promise<port>> — in-flight start operations
 const startingPlugins = new Map();
 
+/** Names the operator lists here are forwarded from the host environment to plugin servers. */
+const PLUGIN_ENV_PASSTHROUGH_VAR = 'CLOUDCLI_PLUGIN_ENV_PASSTHROUGH';
+/** Plain identifiers only, so a malformed list entry is ignored instead of read as a key. */
+const ENV_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 /**
  * Build the environment handed to a plugin server subprocess.
  *
@@ -21,12 +26,18 @@ const startingPlugins = new Map();
  * site-packages and fails to import; SystemRoot, PATHEXT and TEMP are needed to
  * resolve system DLLs, executable extensions and a temp directory. None of
  * these carry secrets, so the ones that are set get passed straight through.
+ *
+ * Operators can add variables to every plugin by naming them, comma or space
+ * separated, in CLOUDCLI_PLUGIN_ENV_PASSTHROUGH (for example DOCKER_HOST so a
+ * terminal plugin's shells reach the same Docker daemon as the server). Only
+ * the listed names are forwarded, so list non-secret values; whatever is listed
+ * is visible to every plugin. The four variables above are never overridden.
  */
-function buildPluginEnv(name) {
-  const env = {
-    PATH: process.env.PATH,
-    HOME: process.env.HOME,
-    NODE_ENV: process.env.NODE_ENV || 'production',
+export function buildPluginEnv(name, hostEnv = process.env) {
+  const env: Record<string, string | undefined> = {
+    PATH: hostEnv.PATH,
+    HOME: hostEnv.HOME,
+    NODE_ENV: hostEnv.NODE_ENV || 'production',
     PLUGIN_NAME: name,
   };
 
@@ -37,9 +48,18 @@ function buildPluginEnv(name) {
       'TEMP', 'TMP', 'PATHEXT',
     ];
     for (const key of WINDOWS_ESSENTIALS) {
-      if (process.env[key] !== undefined) {
-        env[key] = process.env[key];
+      if (hostEnv[key] !== undefined) {
+        env[key] = hostEnv[key];
       }
+    }
+  }
+
+  const passthroughNames = (hostEnv[PLUGIN_ENV_PASSTHROUGH_VAR] || '')
+    .split(/[\s,]+/)
+    .filter((key) => ENV_NAME_PATTERN.test(key));
+  for (const key of passthroughNames) {
+    if (!(key in env) && hostEnv[key] !== undefined) {
+      env[key] = hostEnv[key];
     }
   }
 
