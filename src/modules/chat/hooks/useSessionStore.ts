@@ -342,6 +342,45 @@ function dedupeAdjacentAssistantEchoes(merged: NormalizedMessage[]): NormalizedM
 }
 
 /**
+ * A provider may announce one tool call more than once under the same id: Kiro
+ * re-sends `tool_call` with the final title and input once it has them, and
+ * streams `tool_call_chunk` rows before it. Each announcement arrives as its
+ * own `tool_use` message, and each would render as its own card. This finds the
+ * live row the new message continues, or -1 when it starts a new call.
+ */
+function findLiveToolUseIndex(realtimeMessages: NormalizedMessage[], message: NormalizedMessage): number {
+  if (message.kind !== 'tool_use' || !message.toolId) {
+    return -1;
+  }
+  for (let index = realtimeMessages.length - 1; index >= 0; index--) {
+    const candidate = realtimeMessages[index];
+    if (
+      candidate.kind === 'tool_use'
+      && candidate.toolId === message.toolId
+      && candidate.parentToolUseId === message.parentToolUseId
+    ) {
+      return index;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Folds a repeated announcement into the row that is already on screen. The row
+ * keeps its id and position so the card is updated in place; fields the newer
+ * message does not carry (a chunk has no input) keep their earlier value.
+ */
+function mergeToolUseUpdate(existing: NormalizedMessage, update: NormalizedMessage): NormalizedMessage {
+  const merged: NormalizedMessage = { ...existing };
+  for (const [key, value] of Object.entries(update)) {
+    if (value !== undefined && value !== null && key !== 'id' && key !== 'timestamp' && key !== 'seq') {
+      (merged as Record<string, unknown>)[key] = value;
+    }
+  }
+  return merged;
+}
+
+/**
  * After a server refresh, drop only the realtime rows the persisted transcript
  * already owns. Anything not yet on disk (common right after `complete`, while
  * JSONL indexing lags) stays in `realtimeMessages` so the chat pane never
@@ -357,9 +396,12 @@ function pruneRealtimeSupersededByServer(
 
   const serverIds = new Set(serverMessages.map((message) => message.id));
   const reconciledRealtimeMessages = removeOptimisticUserEchoes(serverMessages, realtimeMessages);
-  // Built on first use and shared by every row of this pass.
+  // Built on first use and shared by every row of this pass. It takes the
+  // reconciled rows: an optimistic `local_` user row whose persisted copy is
+  // already on the server would otherwise count as a second user turn and
+  // shift every later row's turn number past the server's turn.
   let turnLookup: TurnLookup | null = null;
-  const getTurnLookup = () => (turnLookup ??= buildTurnLookup(serverMessages, realtimeMessages));
+  const getTurnLookup = () => (turnLookup ??= buildTurnLookup(serverMessages, reconciledRealtimeMessages));
 
   return reconciledRealtimeMessages.filter((message) => {
     if (serverIds.has(message.id)) {
@@ -815,7 +857,14 @@ export function useSessionStore() {
       msg.sessionId === sessionId
         ? msg
         : { ...msg, sessionId };
-    let updated = [...slot.realtimeMessages, normalizedMessage];
+    const existingToolUseIndex = findLiveToolUseIndex(slot.realtimeMessages, normalizedMessage);
+    let updated: NormalizedMessage[];
+    if (existingToolUseIndex >= 0) {
+      updated = [...slot.realtimeMessages];
+      updated[existingToolUseIndex] = mergeToolUseUpdate(updated[existingToolUseIndex], normalizedMessage);
+    } else {
+      updated = [...slot.realtimeMessages, normalizedMessage];
+    }
     if (updated.length > MAX_REALTIME_MESSAGES) {
       updated = updated.slice(-MAX_REALTIME_MESSAGES);
     }

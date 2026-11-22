@@ -469,6 +469,9 @@ question rendered twice in another.
   `complete` will follow and nothing else would ever clear the busy state.
 - **Only `protocol_error` synthesises a message row on the client.** Every other row
   originates from a provider or from the local optimistic echo.
+- **A repeated `tool_use` with the same `toolId` updates its live row.** Kiro announces a call
+  again once it has the final title and input (and streams `tool_call_chunk` before). `appendRealtime`
+  merges the repeat into the first row, keeping its id and place, so the call renders as one card.
 - **Realtime rows are capped at 500 per session** (`MAX_REALTIME_MESSAGES`), oldest
   dropped. A tool-heavy run can exceed that; the persisted transcript is the fallback.
 - **The server's replay buffer is 5000 events per run, retained 5 minutes after
