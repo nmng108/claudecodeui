@@ -205,6 +205,12 @@ const builtInCommands = [
     metadata: { type: "builtin" },
   },
   {
+    name: "/clear",
+    description: "Clear this session's context and keep its history",
+    namespace: "builtin",
+    metadata: { type: "builtin" },
+  },
+  {
     name: "/cost",
     description: "Display token usage information",
     namespace: "builtin",
@@ -616,6 +622,17 @@ Custom commands can be created in:
       // A chat notice, not the help modal: that modal lists commands and ignores free text.
       action: "notice",
       data: { message: lines.join("\n") },
+    };
+  },
+
+  // The session itself is cleared by the client through the providers
+  // module's clear-context route, which owns sessions; this only names the
+  // action, like "/config" does for the settings screen.
+  "/clear": async () => {
+    return {
+      type: "builtin",
+      action: "clear",
+      data: {},
     };
   },
 

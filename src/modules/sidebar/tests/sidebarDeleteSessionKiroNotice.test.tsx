@@ -41,21 +41,21 @@ const renderDialog = (pendingDeletion: PendingSidebarDeletion) => render(
 );
 
 test('deleting a Kiro session warns that it is also removed from Kiro and kiro-ui', () => {
-  renderDialog({ kind: 'session', sessionId: 's1', sessionTitle: 'Kiro chat', isArchived: false, provider: 'kiro' });
+  renderDialog({ kind: 'session', sessionId: 's1', sessionTitle: 'Kiro chat', provider: 'kiro' });
 
   screen.getByText('Deleting permanently also removes this session from Kiro and kiro-ui.');
   screen.getByRole('button', { name: /Delete permanently/ });
 });
 
 test('other providers get no Kiro warning', () => {
-  renderDialog({ kind: 'session', sessionId: 's2', sessionTitle: 'Claude chat', isArchived: false, provider: 'claude' });
+  renderDialog({ kind: 'session', sessionId: 's2', sessionTitle: 'Claude chat', provider: 'claude' });
 
   assert.equal(screen.queryByText(/Kiro and kiro-ui/), null);
   screen.getByRole('button', { name: /Delete permanently/ });
 });
 
 test('a session without a known provider gets no Kiro warning', () => {
-  renderDialog({ kind: 'session', sessionId: 's3', sessionTitle: 'Untyped', isArchived: true });
+  renderDialog({ kind: 'session', sessionId: 's3', sessionTitle: 'Untyped' });
 
   assert.equal(screen.queryByText(/Kiro and kiro-ui/), null);
 });

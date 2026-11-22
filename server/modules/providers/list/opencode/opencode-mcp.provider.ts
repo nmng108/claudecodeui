@@ -11,6 +11,8 @@ import {
   readOptionalString,
   readStringArray,
   readStringRecord,
+  stripJsonComments,
+  stripTrailingCommas,
 } from '@/shared/utils.js';
 
 type OpenCodeConfigPath = {
