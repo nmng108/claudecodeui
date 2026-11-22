@@ -349,9 +349,12 @@ function pruneRealtimeSupersededByServer(
 
   const serverIds = new Set(serverMessages.map((message) => message.id));
   const reconciledRealtimeMessages = removeOptimisticUserEchoes(serverMessages, realtimeMessages);
-  // Built on first use and shared by every row of this pass.
+  // Built on first use and shared by every row of this pass. It takes the
+  // reconciled rows: an optimistic `local_` user row whose persisted copy is
+  // already on the server would otherwise count as a second user turn and
+  // shift every later row's turn number past the server's turn.
   let turnLookup: TurnLookup | null = null;
-  const getTurnLookup = () => (turnLookup ??= buildTurnLookup(serverMessages, realtimeMessages));
+  const getTurnLookup = () => (turnLookup ??= buildTurnLookup(serverMessages, reconciledRealtimeMessages));
 
   return reconciledRealtimeMessages.filter((message) => {
     if (serverIds.has(message.id)) {

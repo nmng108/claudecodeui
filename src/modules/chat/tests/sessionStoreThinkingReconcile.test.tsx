@@ -74,6 +74,31 @@ describe('live thinking rows after a server refresh', () => {
     assert.deepEqual(thoughts.map((row) => row.id), ['s:1']);
   });
 
+  it('drops a live thought when the optimistic user row of its turn is still in the store', async () => {
+    const { result } = await openStore();
+
+    // The composer's local echo and the transcript's copy of the same message
+    // must count as one turn, or the thought is looked up under the wrong turn.
+    act(() => {
+      result.current.appendRealtime('session-1', message('local_1', 0, {
+        kind: 'text',
+        role: 'user',
+        content: 'question',
+      }));
+      result.current.appendRealtime('session-1', message('thinking_live', 2, {
+        kind: 'thinking',
+        content: 'I should look at the file first',
+      }));
+    });
+    await act(async () => {
+      await result.current.fetchFromServer('session-1', { limit: 20, offset: 0 });
+    });
+
+    const rows = result.current.getMessages('session-1');
+    assert.deepEqual(rows.filter((row) => row.kind === 'thinking').map((row) => row.id), ['s:1']);
+    assert.equal(rows.some((row) => row.id === 'local_1'), false);
+  });
+
   it('keeps a live thought the transcript does not hold yet', async () => {
     const { result } = await openStore();
 
