@@ -123,6 +123,8 @@ docker run -p 3001:3001 -v $(pwd):/workspace \
   cloudcli:standard
 ```
 
+To run the published images without building anything, download `cloudcli-deploy.tar.gz` from the [latest release](https://github.com/nmng108/claudecodeui/releases/latest), extract it and run `./install.sh`. The release also has an offline bundle (images and language runtimes included) for machines that cannot pull images. See [deploy/INSTALL.md](deploy/INSTALL.md).
+
 See [docker/README.md](docker/README.md#standard-non-sandbox-image) for volumes, API key handling and the Debian (glibc) base image rationale.
 
 To develop CloudCLI itself in a container, with the source bind-mounted and hot reload, use the development stack: `docker compose --env-file .env.compose -f docker-compose.dev.yml up --build` after copying `.env.compose.example` to `.env.compose` (see [docker/README.md](docker/README.md#development-image)).

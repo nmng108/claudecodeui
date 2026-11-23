@@ -136,20 +136,7 @@ feat!: redesign settings page layout
 
 ## Releases
 
-Releases are managed by maintainers using [release-it](https://github.com/release-it/release-it) with the [conventional changelog plugin](https://github.com/release-it/conventional-changelog).
-
-```bash
-npm run release           # interactive (prompts for version bump)
-npm run release -- patch  # patch release
-npm run release -- minor  # minor release
-```
-
-This automatically:
-- Bumps the version based on commit types (`feat` = minor, `fix` = patch)
-- Generates categorized release notes
-- Updates `CHANGELOG.md`
-- Creates a git tag and GitHub Release
-- Publishes to npm
+Releases are made by maintainers merging the release pull request that [release-please](https://github.com/googleapis/release-please) keeps open on `main`. It bumps the version from the commit types (`feat` = minor, `fix` = patch) and writes `CHANGELOG.md`. Merging it creates the tag and GitHub Release, and publishes the npm package, the Docker images and the install bundles. See [docs/releasing.md](docs/releasing.md).
 
 ## License
 

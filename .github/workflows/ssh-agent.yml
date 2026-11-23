@@ -1,0 +1,189 @@
+name: ssh-agent image
+
+# The ssh-agent image has its own version (docker/ssh-agent/version.json), separate from
+# the app's, because it changes rarely. This workflow publishes
+# ghcr.io/<owner>/cloudcli-ssh-agent:<version> for amd64 and arm64.
+#
+# It runs when that counter changes on main, or by hand (Actions -> ssh-agent image ->
+# Run workflow). A tag that already exists is left alone, unless "force" is set, which
+# rebuilds and overwrites it (for example to pick up a fixed base image).
+#
+# A release of the app only checks that the version it needs exists; see
+# docs/releasing.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docker/ssh-agent/version.json
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Rebuild and overwrite the tag if it already exists"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ssh-agent-image
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      registry: ${{ steps.plan.outputs.registry }}
+      proceed: ${{ steps.plan.outputs.proceed }}
+      latest: ${{ steps.plan.outputs.latest }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: plan
+        env:
+          OWNER: ${{ github.repository_owner }}
+          FORCE: ${{ inputs.force }}
+          REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          # The image's files must match what the counter was bumped for.
+          scripts/release/ssh-agent-version.sh check
+          VERSION="$(scripts/release/ssh-agent-version.sh print)"
+          REGISTRY="ghcr.io/${OWNER,,}"
+
+          PROCEED=true
+          if docker buildx imagetools inspect "$REGISTRY/cloudcli-ssh-agent:$VERSION" >/dev/null 2>&1; then
+            if [ "$FORCE" = true ]; then
+              echo "::notice::$VERSION exists and will be overwritten (force)."
+            else
+              echo "::notice::cloudcli-ssh-agent:$VERSION already exists; nothing to do. Use force to rebuild it."
+              PROCEED=false
+            fi
+          fi
+          # `latest` follows main only, so a run from a branch cannot move it.
+          LATEST=false
+          [ "$REF" = refs/heads/main ] && LATEST=true
+
+          {
+            echo "version=$VERSION"
+            echo "registry=$REGISTRY"
+            echo "proceed=$PROCEED"
+            echo "latest=$LATEST"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.arch }})
+    needs: plan
+    if: needs.plan.outputs.proceed == 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-latest }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: Build for the test
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          file: ./docker/ssh-agent/Dockerfile
+          load: true
+          tags: ci/cloudcli-ssh-agent:ci
+          cache-from: type=gha,scope=ssh-agent-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=ssh-agent-${{ matrix.arch }}
+
+      - name: Start it
+        run: scripts/ci/smoke-ssh-agent.sh ci/cloudcli-ssh-agent:ci
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push by digest
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          file: ./docker/ssh-agent/Dockerfile
+          provenance: false
+          sbom: false
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.plan.outputs.version }}
+            org.opencontainers.image.licenses=AGPL-3.0-or-later
+          outputs: type=image,name=${{ needs.plan.outputs.registry }}/cloudcli-ssh-agent,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=ssh-agent-${{ matrix.arch }}
+
+      - name: Keep the digest
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: digests-ssh-agent-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Tag
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: digests-ssh-agent-*
+          merge-multiple: true
+          path: /tmp/digests
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create the multi-architecture tags
+        env:
+          REPO: ${{ needs.plan.outputs.registry }}/cloudcli-ssh-agent
+          VERSION: ${{ needs.plan.outputs.version }}
+          LATEST: ${{ needs.plan.outputs.latest }}
+        run: |
+          set -euo pipefail
+          TAG_ARGS=(-t "$REPO:$VERSION")
+          [ "$LATEST" = true ] && TAG_ARGS+=(-t "$REPO:latest")
+          SOURCES=()
+          for digest in /tmp/digests/*; do SOURCES+=("$REPO@sha256:$(basename "$digest")"); done
+          docker buildx imagetools create "${TAG_ARGS[@]}" "${SOURCES[@]}"
+          docker buildx imagetools inspect "$REPO:$VERSION"

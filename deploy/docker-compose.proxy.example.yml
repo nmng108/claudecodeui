@@ -1,0 +1,28 @@
+# Proxy settings, kept in a file of their own so they can be switched on and off.
+#
+#   cp docker-compose.proxy.example.yml compose.proxy.yaml     (edit the addresses)
+#   make FILES="-f compose.proxy.yaml" up                      proxy on
+#   make up                                                    proxy off
+#
+# Without make: ./cloudcli-docker -f compose.proxy.yaml up, or export
+# CLOUDCLI_FILES=compose.proxy.yaml once so every command uses it.
+# Containers get the proxy when they are (re)created, so run `up` after switching.
+#
+# NO_PROXY must keep the service names (dind, ssh-agent) and localhost, or the app cannot
+# reach its own helpers. Both spellings are set because tools differ.
+x-proxy: &proxy
+  HTTP_PROXY: http://proxy.example.com:3128
+  HTTPS_PROXY: http://proxy.example.com:3128
+  NO_PROXY: localhost,127.0.0.1,dind,ssh-agent,.example.com
+  http_proxy: http://proxy.example.com:3128
+  https_proxy: http://proxy.example.com:3128
+  no_proxy: localhost,127.0.0.1,dind,ssh-agent,.example.com
+
+services:
+  cloudcli:
+    environment: *proxy
+  # The optional Docker daemon pulls images through the proxy too (--dind).
+  dind:
+    environment: *proxy
+  dind-privileged:
+    environment: *proxy

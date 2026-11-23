@@ -184,6 +184,18 @@ Build args:
 | `CLOUDCLI_VERSION` | `latest` | npm dist-tag or version of `@namng108/cloudcli` to install |
 | `NPM_REGISTRY` | `https://registry.npmjs.org` | Override for a private/mirrored npm registry |
 
+Instead of installing from the registry, the image can install a local `npm pack` tarball: pass the folder holding it with `--build-context cloudcli-pkg=<folder>` (`docker build` or `docker buildx build`). CI builds the published images this way, so they contain the exact package that was tested and published.
+
+To run the released images without building (what end users do), see [deploy/INSTALL.md](../deploy/INSTALL.md). Those files are `deploy/docker-compose.yml` (images only) and `deploy/cloudcli-docker`.
+
+#### Container user
+
+The container starts as root, gives its `agent` user the uid/gid from `AGENT_UID` / `AGENT_GID` (default 1000, the build arguments of the same name), re-owns the data volumes if they belong to other ids, and drops root before starting anything (`docker/shared/entrypoint.mjs`). So the published image needs no rebuild to match the host user that owns `/workspace`. `AGENT_UID`/`AGENT_GID` of 0 are refused, and with `docker run --user` the entrypoint changes nothing. `docker exec` opens a root shell: add `-u agent` for the app's user. The `ssh-agent` service takes the same `AGENT_GID`.
+
+#### Offline image
+
+`docker/offline/Dockerfile` adds the language runtimes of `docker/mise.toml` (already pinned exactly) on top of a release image, for hosts that cannot download them at start. CI builds it for each release and ships it in the offline bundle; see [docs/releasing.md](../docs/releasing.md).
+
 ### API keys
 
 No keys are baked into the image. Pass them at `docker run`/`compose up` time as environment variables (see `KIRO_API_KEY` / `ANTHROPIC_API_KEY` in `docker-compose.yml`, which default to empty via `${VAR:-}` if unset):
