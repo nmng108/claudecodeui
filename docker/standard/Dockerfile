@@ -8,6 +8,11 @@
 ARG MISE_VERSION=2026.11.0
 # Docker major version of the CLI; keep it equal to the dind service's (docker-compose.docker.yml).
 ARG DOCKER_VERSION=29
+# Optional local package: CI passes the exact tarball it tested and publishes
+# (`--build-context cloudcli-pkg=<dir holding the .tgz>`), so the image holds that
+# package and not whatever the npm registry serves. Empty by default, in which
+# case CLOUDCLI_VERSION is installed from the registry.
+FROM scratch AS cloudcli-pkg
 # Static binary; works on any libc.
 FROM ghcr.io/jdx/mise:${MISE_VERSION} AS mise
 # The Docker CLI is a static Go binary, so the Alpine-based CLI image is only a download source.
@@ -93,8 +98,12 @@ RUN npm install -g @anthropic-ai/claude-code && \
 # below only ever gets its own $HOME chowned to it.
 ARG CLOUDCLI_VERSION=latest
 ARG NPM_REGISTRY=https://registry.npmjs.org
-RUN --mount=type=cache,target=/tmp/npm-cache,sharing=locked,mode=0777 \
-    npm install -g @namng108/cloudcli@${CLOUDCLI_VERSION} \
+RUN --mount=type=bind,from=cloudcli-pkg,target=/pkg \
+    --mount=type=cache,target=/tmp/npm-cache,sharing=locked,mode=0777 \
+    set -e; \
+    PKG="$(ls /pkg/*.tgz 2>/dev/null | head -n 1 || true)"; \
+    if [ -n "$PKG" ]; then SPEC="$PKG"; else SPEC="@namng108/cloudcli@${CLOUDCLI_VERSION}"; fi; \
+    npm install -g "$SPEC" \
       --registry=${NPM_REGISTRY} \
       --cache=/tmp/npm-cache \
       --fetch-retries=5 \
@@ -133,6 +142,8 @@ COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-compose /usr
 COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
 COPY mise.toml /etc/mise/config.toml
 COPY shared/mise-sync.mjs /usr/local/lib/cloudcli/mise-sync.mjs
+# Runs first, as root: gives `agent` the host's uid/gid, fixes volume ownership, drops root.
+COPY shared/entrypoint.mjs /usr/local/lib/cloudcli/entrypoint.mjs
 # Writes the note about this container's Docker setup into the agents' instruction files at start.
 COPY shared/agent-environment.mjs /usr/local/lib/cloudcli/agent-environment.mjs
 COPY shared/agent-environment/ /usr/local/lib/cloudcli/agent-environment/
@@ -201,7 +212,13 @@ EXPOSE 3001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD curl -fsS "http://127.0.0.1:${SERVER_PORT}/health" || exit 1
 
-# agent-environment.mjs writes the agents' Docker note, mise-sync.mjs installs/prunes the language
-# runtimes in /mise, then the CMD starts.
-ENTRYPOINT ["tini", "--", "node", "/usr/local/lib/cloudcli/agent-environment.mjs", "--", "node", "/usr/local/lib/cloudcli/mise-sync.mjs", "--"]
+# The container starts as root so that entrypoint.mjs can give the `agent` user the
+# host's uid/gid (AGENT_UID / AGENT_GID, set by the deploy compose file) and fix the
+# ownership of the data volumes; it drops to `agent` before running anything else.
+# Started with `--user`, it changes nothing. `docker exec` opens a root shell: add
+# `-u agent` for the app's user.
+# Then agent-environment.mjs writes the agents' Docker note, mise-sync.mjs installs/prunes
+# the language runtimes in /mise, and the CMD starts.
+USER root
+ENTRYPOINT ["tini", "--", "node", "/usr/local/lib/cloudcli/entrypoint.mjs", "--", "node", "/usr/local/lib/cloudcli/agent-environment.mjs", "--", "node", "/usr/local/lib/cloudcli/mise-sync.mjs", "--"]
 CMD ["cloudcli", "start", "--port", "3001"]

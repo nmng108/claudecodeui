@@ -61,6 +61,12 @@ function writeRecord(ids) {
 }
 
 function sync() {
+  // CLOUDCLI_MISE_SYNC=0 starts the app without touching the runtimes (CI smoke tests,
+  // hosts that must not download anything).
+  if (process.env.CLOUDCLI_MISE_SYNC === '0') {
+    log('CLOUDCLI_MISE_SYNC=0; skipping the language runtimes.');
+    return;
+  }
   if (!existsSync(systemConfig)) {
     log(`No ${systemConfig}; nothing to install.`);
     return;

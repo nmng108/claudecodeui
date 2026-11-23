@@ -1,79 +1,513 @@
 name: Release
 
+# Every push to main updates a "release PR" (release-please): it bumps package.json and
+# CHANGELOG.md from the conventional commits since the last release. Merging that PR
+# creates the tag vX.Y.Z and the GitHub Release, and this same run publishes:
+#
+#   package -> smoke (both CPU architectures) -> npm -> app image (GHCR) -> bundles (Release assets)
+#
+# Publishing runs in this workflow, not in a separate one triggered by the tag: a tag
+# created with GITHUB_TOKEN does not start other workflows.
+#
+# The ssh-agent image is not built here. It has its own version and workflow
+# (ssh-agent.yml); this one only checks that the version the release needs exists.
+#
+# The file name matters: the npm trusted publisher (npmjs.com -> package -> Settings)
+# is bound to "release.yml". Rename it only together with that setting.
+#
+# workflow_dispatch has two uses (Actions -> Release -> Run workflow):
+#   - with a tag (v1.39.0): publish that existing release again, for when a step failed.
+#     Only for tags made with this pipeline: the tag's own files are used.
+#   - with the tag empty: a dry run of everything on the selected branch (package, images,
+#     offline image, bundles) that publishes nothing.
+# Every step can be repeated: npm and image pushes skip what already exists or overwrite
+# with the same content, and release assets are replaced.
+#
+# See docs/releasing.md.
+
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
-      increment:
-        description: "Version bump: patch, minor, major, or explicit (e.g. 1.27.0)"
-        required: true
-        default: "patch"
-        type: string
-      release_name:
-        description: 'Custom release name (optional, defaults to "CloudCLI UI vX.Y.Z")'
+      tag:
+        description: "Existing release tag to publish again (v1.39.0). Leave empty for a dry run of this branch that publishes nothing."
         required: false
         type: string
 
 permissions:
   contents: read
 
-# This workflow publishes releases with write credentials, so actions are pinned
-# to immutable commit SHAs. The trailing comments keep the original major tag
-# visible for maintenance context.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+  HUSKY: "0"
+
+# This workflow publishes with write credentials, so actions are pinned to immutable
+# commit SHAs. The trailing comments keep the original major tag visible.
 jobs:
-  release:
+  release-please:
+    name: Release PR
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      id-token: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+        with:
+          # A personal access token makes CI run on the release PR; GITHUB_TOKEN works too
+          # but its PRs do not trigger workflows.
+          token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  plan:
+    name: Plan
+    needs: release-please
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || needs.release-please.outputs.release_created == 'true') }}
+    runs-on: ubuntu-latest
+    outputs:
+      dry_run: ${{ steps.plan.outputs.dry_run }}
+      ref: ${{ steps.plan.outputs.ref }}
+      tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
+      prerelease: ${{ steps.plan.outputs.prerelease }}
+      image_tags: ${{ steps.plan.outputs.image_tags }}
+      registry: ${{ steps.plan.outputs.registry }}
+    steps:
+      # Only for the version of a dry run; a release takes it from the tag.
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          DRY_RUN=false
+          if [ "$EVENT" = workflow_dispatch ]; then TAG="$INPUT_TAG"; else TAG="$RELEASE_TAG"; fi
+
+          if [ -z "$TAG" ]; then
+            # Dry run: this branch, with the version it has now.
+            DRY_RUN=true
+            REF="$SHA"
+            VERSION="$(node -p "require('./package.json').version")"
+          else
+            REF="$TAG"
+            VERSION="${TAG#v}"
+          fi
+
+          if ! [[ "v$VERSION" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Not a release version: '$VERSION'" >&2
+            exit 1
+          fi
+          MAJOR="${BASH_REMATCH[1]}"
+          MINOR="${BASH_REMATCH[2]}"
+          PRERELEASE=false
+          [ -n "${BASH_REMATCH[4]}" ] && PRERELEASE=true
+
+          # Image tags: always the exact version. The moving ones (X.Y, X, latest) only
+          # move forward: a tag that is not the highest stable release of its line, such
+          # as an old release published again, leaves them where they are.
+          TAGS="$VERSION"
+          if [ "$PRERELEASE" = false ]; then
+            STABLE="$( (git ls-remote --tags --refs "https://github.com/$REPO.git" 'v*' | sed 's#.*refs/tags/v##' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' || true; echo "$VERSION") | sort -Vu)"
+            highest() { printf '%s\n' "$STABLE" | grep -E "$1" | sort -V | tail -n 1; }
+            [ "$(highest "^$MAJOR\.$MINOR\.")" = "$VERSION" ] && TAGS="$TAGS"$'\n'"$MAJOR.$MINOR"
+            [ "$MAJOR" != 0 ] && [ "$(highest "^$MAJOR\.")" = "$VERSION" ] && TAGS="$TAGS"$'\n'"$MAJOR"
+            [ "$(highest '^')" = "$VERSION" ] && TAGS="$TAGS"$'\n'"latest"
+          fi
+          echo "Image tags: $(echo "$TAGS" | tr '\n' ' ')"
+
+          {
+            echo "dry_run=$DRY_RUN"
+            echo "ref=$REF"
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "prerelease=$PRERELEASE"
+            # GHCR names are lowercase.
+            echo "registry=ghcr.io/${OWNER,,}"
+            echo "image_tags<<EOF"
+            echo "$TAGS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  package:
+    name: Build the package
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          fetch-depth: 0
-          token: ${{ secrets.RELEASE_PAT }}
+          ref: ${{ needs.plan.outputs.ref }}
 
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: package.json matches the tag
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          actual="$(node -p "require('./package.json').version")"
+          if [ "$actual" != "$VERSION" ]; then
+            echo "package.json is $actual but the tag is v$VERSION" >&2
+            exit 1
+          fi
+
+      - run: npm ci
+      - run: npm run build
+
+      # The one tarball that is tested, published to npm and installed into the image.
+      - name: Pack
+        run: |
+          mkdir pkg
+          npm pack --pack-destination pkg
+          ls -l pkg
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: package
+          path: pkg/*.tgz
+          if-no-files-found: error
+
+  # The ssh-agent image has its own version (ssh-agent.yml). A release needs the one named
+  # in docker/ssh-agent/version.json to exist, or the compose file would name a missing image.
+  agent:
+    name: ssh-agent image exists
+    needs: plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      version: ${{ steps.agent.outputs.version }}
+      published: ${{ steps.agent.outputs.published }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: agent
+        env:
+          REGISTRY: ${{ needs.plan.outputs.registry }}
+          DRY_RUN: ${{ needs.plan.outputs.dry_run }}
+        run: |
+          set -euo pipefail
+          scripts/release/ssh-agent-version.sh check
+          VERSION="$(scripts/release/ssh-agent-version.sh print)"
+          PUBLISHED=false
+          if docker buildx imagetools inspect "$REGISTRY/cloudcli-ssh-agent:$VERSION" >/dev/null 2>&1; then
+            PUBLISHED=true
+          elif [ "$DRY_RUN" = true ]; then
+            echo "::warning::cloudcli-ssh-agent:$VERSION is not published; the dry run builds it locally."
+          else
+            echo "cloudcli-ssh-agent:$VERSION is not in GHCR." >&2
+            echo "Publish it first: Actions -> ssh-agent image -> Run workflow, then run this release again." >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "published=$PUBLISHED" >> "$GITHUB_OUTPUT"
+
+  smoke:
+    name: Test images (${{ matrix.arch }})
+    needs: [plan, package]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-latest }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: package
+          path: pkg
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: Build the app image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: ./docker
+          file: ./docker/standard/Dockerfile
+          build-contexts: cloudcli-pkg=./pkg
+          load: true
+          tags: ci/cloudcli:ci
+          cache-from: type=gha,scope=cloudcli-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=cloudcli-${{ matrix.arch }}
+
+      # Built from this checkout, to test the stack; the published one is checked by `agent`.
+      - name: Build the ssh-agent image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          file: ./docker/ssh-agent/Dockerfile
+          load: true
+          tags: ci/cloudcli-ssh-agent:ci
+
+      - name: Start the app image
+        run: scripts/ci/smoke-image.sh ci/cloudcli:ci "${{ needs.plan.outputs.version }}"
+
+      - name: Start the deploy files with both images
+        run: scripts/ci/smoke-stack.sh ci ci ci
+
+  publish-npm:
+    name: Publish to npm
+    needs: [plan, package, agent, smoke]
+    if: needs.plan.outputs.dry_run != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
 
-      - name: git config
-        run: |
-          git config user.name "${GITHUB_ACTOR}"
-          git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
-
       # Trusted publishing (OIDC) requires npm >= 11.5.1; Node 22 ships npm 10.x.
       - name: Use an npm that supports trusted publishing
         run: npm install -g npm@^11.5.1
 
-      - run: npm ci
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: package
+          path: pkg
 
-      - name: Release
-        id: release
-        run: |
-          # Stream subprocess output so publishing errors are visible immediately.
-          ARGS=(--ci --verbose --verbose "--increment=$RELEASE_INCREMENT")
-          if [ -n "$RELEASE_NAME" ]; then
-            ARGS+=("--github.releaseName=$RELEASE_NAME")
-          fi
-          npx release-it "${ARGS[@]}"
+      - name: Publish
         env:
-          RELEASE_INCREMENT: ${{ inputs.increment }}
-          RELEASE_NAME: ${{ inputs.release_name }}
-          GITHUB_TOKEN: ${{ secrets.RELEASE_PAT }}
-          NPM_CONFIG_LOGS_DIR: ${{ runner.temp }}/release-npm-logs
+          PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          TARBALL="$(ls pkg/*.tgz)"
+          NAME="$(tar -xzOf "$TARBALL" package/package.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).name")"
+          VERSION="$(tar -xzOf "$TARBALL" package/package.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")"
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "$NAME@$VERSION is already on npm; nothing to publish."
+            exit 0
+          fi
+          ARGS=(--access public)
+          # A prerelease must not become the version `npm install` picks.
+          if [ "$PRERELEASE" = true ]; then ARGS+=(--tag next); fi
+          npm publish "$TARBALL" "${ARGS[@]}" --loglevel warn
 
-      - name: Show npm failure details
-        if: failure() && steps.release.outcome == 'failure'
+  push:
+    name: Push the app image (${{ matrix.arch }})
+    needs: [plan, publish-npm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-latest }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: package
+          path: pkg
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pushed by digest; the next job puts the two architectures under one tag. The
+      # layers come from the cache of the smoke job, so this is not a second full build.
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: ./docker
+          file: ./docker/standard/Dockerfile
+          build-contexts: cloudcli-pkg=./pkg
+          provenance: false
+          sbom: false
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.plan.outputs.version }}
+            org.opencontainers.image.licenses=AGPL-3.0-or-later
+          outputs: type=image,name=${{ needs.plan.outputs.registry }}/cloudcli,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=cloudcli-${{ matrix.arch }}
+
+      - name: Keep the digest
         env:
-          NPM_CONFIG_LOGS_DIR: ${{ runner.temp }}/release-npm-logs
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          # Read npm's on-disk errors even if release-it truncates its console output.
-          shopt -s nullglob
-          LOGS=("$NPM_CONFIG_LOGS_DIR"/*debug*.log)
-          if [ ${#LOGS[@]} -eq 0 ]; then
-            echo "No npm debug logs were created by the release step."
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: digests-cloudcli-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Tag the app image
+    needs: [plan, push]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: digests-cloudcli-*
+          merge-multiple: true
+          path: /tmp/digests
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create the multi-architecture tags
+        env:
+          REPO: ${{ needs.plan.outputs.registry }}/cloudcli
+          IMAGE_TAGS: ${{ needs.plan.outputs.image_tags }}
+        run: |
+          set -euo pipefail
+          TAG_ARGS=()
+          while IFS= read -r tag; do
+            [ -n "$tag" ] && TAG_ARGS+=(-t "$REPO:$tag")
+          done <<< "$IMAGE_TAGS"
+          SOURCES=()
+          for digest in /tmp/digests/*; do SOURCES+=("$REPO@sha256:$(basename "$digest")"); done
+          docker buildx imagetools create "${TAG_ARGS[@]}" "${SOURCES[@]}"
+          docker buildx imagetools inspect "$REPO:${{ needs.plan.outputs.version }}"
+
+  # In a dry run nothing was pushed, so this job builds what it needs on the spot.
+  bundles:
+    name: Bundles
+    needs: [plan, agent, smoke, merge]
+    if: ${{ !cancelled() && needs.smoke.result == 'success' && needs.agent.result == 'success' && (needs.plan.outputs.dry_run == 'true' || needs.merge.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      packages: read
+    env:
+      DRY_RUN: ${{ needs.plan.outputs.dry_run }}
+      VERSION: ${{ needs.plan.outputs.version }}
+      AGENT_VERSION: ${{ needs.agent.outputs.version }}
+      REGISTRY: ${{ needs.plan.outputs.dry_run == 'true' && 'local' || needs.plan.outputs.registry }}
+    steps:
+      # The offline image holds three JDKs and more; the default runner disk is tight.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ needs.plan.outputs.ref }}
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        if: needs.plan.outputs.dry_run != 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: needs.plan.outputs.dry_run == 'true'
+        with:
+          name: package
+          path: pkg
+
+      - name: The app image (built, in a dry run)
+        if: needs.plan.outputs.dry_run == 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: ./docker
+          file: ./docker/standard/Dockerfile
+          build-contexts: cloudcli-pkg=./pkg
+          load: true
+          tags: local/cloudcli:${{ needs.plan.outputs.version }}
+          cache-from: type=gha,scope=cloudcli-amd64
+
+      - name: The app image (the published one)
+        if: needs.plan.outputs.dry_run != 'true'
+        run: docker pull "$REGISTRY/cloudcli:$VERSION"
+
+      - name: The ssh-agent image
+        env:
+          PUBLISHED: ${{ needs.agent.outputs.published }}
+        run: |
+          set -euo pipefail
+          if [ "$PUBLISHED" = true ]; then
+            docker pull "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/cloudcli-ssh-agent:$AGENT_VERSION"
+            docker tag "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/cloudcli-ssh-agent:$AGENT_VERSION" "$REGISTRY/cloudcli-ssh-agent:$AGENT_VERSION"
+          else
+            docker build -f docker/ssh-agent/Dockerfile -t "$REGISTRY/cloudcli-ssh-agent:$AGENT_VERSION" .
           fi
-          for LOG in "${LOGS[@]}"; do
-            echo "npm diagnostics: $(basename "$LOG")"
-            grep -E '^[0-9]+ (error|verbose (stack|exit|code))([[:space:]]|$)' "$LOG" || true
-          done
+
+      - name: Build the offline image
+        run: |
+          set -euo pipefail
+          docker build -f docker/offline/Dockerfile \
+            --build-arg "BASE_IMAGE=$REGISTRY/cloudcli:$VERSION" \
+            -t "$REGISTRY/cloudcli:$VERSION-offline" docker/
+          docker image ls
+
+      - name: Start it without network
+        run: scripts/ci/smoke-offline.sh "$REGISTRY/cloudcli:$VERSION-offline"
+
+      - name: Build the bundles
+        run: |
+          set -euo pipefail
+          scripts/release/build-deploy-bundle.sh "$VERSION" "$AGENT_VERSION" out
+          scripts/release/build-deploy-bundle.sh "$VERSION" "$AGENT_VERSION" out --offline "$REGISTRY"
+          ls -lh out
+
+      - name: Attach to the release
+        if: needs.plan.outputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: gh release upload "$TAG" out/* --clobber --repo "$GITHUB_REPOSITORY"

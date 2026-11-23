@@ -1,0 +1,33 @@
+# Your own changes to docker-compose.yml. Copy this file to docker-compose.override.yml
+# and keep the parts you need: ./cloudcli-docker loads that file automatically, and
+# upgrades never replace it. Compose merges it into docker-compose.yml: lists such as
+# volumes and ports are added to, single values replace.
+#
+# Paths on the left of a volume must be absolute (or start with ./, which is the folder
+# of this file).
+services:
+  cloudcli:
+    # --- A proxy: use docker-compose.proxy.example.yml (a file you switch on and off)
+    # --- A certificate authority of your own (a company proxy that inspects TLS) ------
+    # Put the PEM file next to this one as company-ca.pem, then uncomment:
+    # environment:
+    #   NODE_EXTRA_CA_CERTS: /etc/ssl/company-ca.pem
+    #   SSL_CERT_FILE: /etc/ssl/company-ca.pem
+    #   GIT_SSL_CAINFO: /etc/ssl/company-ca.pem
+    #   REQUESTS_CA_BUNDLE: /etc/ssl/company-ca.pem
+    # volumes:
+    #   - ./company-ca.pem:/etc/ssl/company-ca.pem:ro
+
+    # --- Package mirrors for the agents' tools (pip, npm) -------------------------
+    # environment:
+    #   PIP_INDEX_URL: https://pypi.example.com/simple
+    #   NPM_CONFIG_REGISTRY: https://npm.example.com/
+    # Maven: set MAVEN_SETTINGS_PATH in .env.compose to a settings.xml with your mirror.
+
+    # --- More folders for the agents ---------------------------------------------
+    # volumes:
+    #   - /data/datasets:/data:ro
+
+    # --- Another published port --------------------------------------------------
+    # ports:
+    #   - '8080:8080'

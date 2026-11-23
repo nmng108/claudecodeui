@@ -1,0 +1,302 @@
+#!/usr/bin/env bash
+# Runs CloudCLI from its published Docker images with docker compose.
+# Needs only bash, Docker (20.10.9 or newer) and Docker Compose v2.20+; no make, no Node.
+# Kept compatible with bash 4.2 (CentOS 7).
+#
+#   ./cloudcli-docker [options] <command> [arguments]
+#
+# Run `./cloudcli-docker help` for the commands and options.
+
+set -eo pipefail
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+DIR="${CLOUDCLI_HOME:-$(dirname "$SELF")}"
+DEPLOY_URL="${CLOUDCLI_DEPLOY_URL:-https://github.com/nmng108/claudecodeui/releases/latest/download/cloudcli-deploy.tar.gz}"
+MIN_COMPOSE="2.20.0"
+MIN_DOCKER="20.10.9"
+# Both daemon profiles are known to `down`, so it removes whichever one was started.
+DIND_PROFILES=(docker docker-privileged)
+
+EXTRA_FILES=()
+PROFILES=()
+WORKSPACE=""
+ASSUME_YES=""
+
+say() { printf '%s\n' "$*"; }
+warn() { printf 'WARNING: %s\n' "$*" >&2; }
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+Usage: ./cloudcli-docker [options] <command> [arguments]
+
+Commands:
+  init               create .env.compose (workspace folder, user ids) if it is missing
+  doctor             check that Docker and Docker Compose are usable
+  up [-- args]       start CloudCLI in the background (extra args go to `docker compose up`)
+  down               stop and remove the containers (volumes and settings are kept)
+  restart            down, then up
+  ps                 list the containers
+  logs [service]     follow the logs (services: cloudcli, ssh-agent)
+  pull               pull the images
+  upgrade            pull the images, then up (the images already here are used if the pull fails)
+  self-update        download the files of the latest release, then upgrade
+  shell [service]    open a shell in a container (default: cloudcli, as the agent user)
+  env                print where the files are
+  compose <args>     run `docker compose` with this project's files and settings
+
+Options (before the command):
+  -f, --file FILE        add a compose file after docker-compose.yml and
+                         docker-compose.override.yml (repeatable; later files win).
+                         Files for every command, set once: CLOUDCLI_FILES=a.yml:b.yml
+  --dind[=KIND]          also run the private Docker daemon for the agents:
+                         KIND is privileged (default, works everywhere) or rootless
+  --workspace DIR        folder with your projects, for `init`
+  -y, --yes              never ask questions
+  --dir DIR              directory with the compose file (default: where this script is)
+  -h, --help             this text
+EOF
+}
+
+# ----------------------------------------------------------------------------
+# helpers
+# ----------------------------------------------------------------------------
+
+# True when version $1 is at least $2.
+version_ge() { [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n 1)" = "$2" ]; }
+
+ask() { # ask "question" "default" -> echoes the answer
+  local answer=""
+  if [ -z "$ASSUME_YES" ] && [ -t 0 ] && [ -t 1 ]; then
+    read -r -p "$1 [$2]: " answer || true
+  fi
+  printf '%s\n' "${answer:-$2}"
+}
+
+env_file() { printf '%s/.env.compose' "$DIR"; }
+
+# Value of KEY in .env.compose (last assignment wins), or $2.
+env_value() {
+  local value=""
+  if [ -f "$(env_file)" ]; then
+    value="$(grep -E "^$1=" "$(env_file)" | tail -n 1 | cut -d= -f2- || true)"
+  fi
+  printf '%s\n' "${value:-$2}"
+}
+
+compose() {
+  local args=(--project-directory "$DIR" --env-file "$(env_file)" -f "$DIR/docker-compose.yml")
+  [ -f "$DIR/docker-compose.override.yml" ] && args+=(-f "$DIR/docker-compose.override.yml")
+  local file
+  # CLOUDCLI_FILES=a.yml:b.yml (relative to this directory) is the same as -f for every
+  # command, set once; -f files come after it.
+  if [ -n "${CLOUDCLI_FILES:-}" ]; then
+    local IFS=:
+    for file in $CLOUDCLI_FILES; do
+      case "$file" in
+        /*) ;;
+        *) file="$DIR/$file" ;;
+      esac
+      [ -f "$file" ] || die "CLOUDCLI_FILES names a file that does not exist: $file"
+      args+=(-f "$file")
+    done
+    unset IFS
+  fi
+  for file in "${EXTRA_FILES[@]}"; do args+=(-f "$file"); done
+  for file in "${PROFILES[@]}"; do args+=(--profile "$file"); done
+  docker compose "${args[@]}" "$@"
+}
+
+# ----------------------------------------------------------------------------
+# commands
+# ----------------------------------------------------------------------------
+
+cmd_doctor() {
+  command -v docker >/dev/null 2>&1 || die "docker is not installed or not in PATH."
+  if ! docker info >/dev/null 2>&1; then
+    die "cannot talk to the Docker daemon. Is it running, and may this user use it? (try: sudo usermod -aG docker \$USER, then log in again)"
+  fi
+  local server compose_version
+  server="$(docker version --format '{{.Server.Version}}' 2>/dev/null || true)"
+  if [ -n "$server" ] && ! version_ge "$server" "$MIN_DOCKER"; then
+    warn "Docker $server is older than $MIN_DOCKER; containers based on Debian 12 may fail to start (seccomp)."
+  fi
+  compose_version="$(docker compose version --short 2>/dev/null || true)"
+  [ -n "$compose_version" ] || die "Docker Compose v2 is missing (docker compose version fails). Install the Compose plugin: https://docs.docker.com/compose/install/linux/"
+  compose_version="${compose_version#v}"
+  version_ge "$compose_version" "$MIN_COMPOSE" || die "Docker Compose $compose_version is older than $MIN_COMPOSE."
+  say "Docker ${server:-?}, Docker Compose $compose_version: ok."
+}
+
+cmd_init() {
+  [ -f "$DIR/docker-compose.yml" ] || die "no docker-compose.yml in $DIR."
+  if [ -f "$(env_file)" ]; then
+    say "$(env_file) already exists; leaving it alone."
+    return 0
+  fi
+  [ -f "$DIR/env.example" ] || die "no env.example in $DIR to create .env.compose from."
+
+  local workspace owner_uid owner_gid created=""
+  workspace="${WORKSPACE:-$(ask "Folder with your projects (mounted at /workspace)" "$DIR/workspace")}"
+  case "$workspace" in
+    /*) ;;
+    *) workspace="$PWD/$workspace" ;;
+  esac
+  if [ ! -d "$workspace" ]; then
+    mkdir -p "$workspace"
+    created=1
+  fi
+  workspace="$(readlink -f "$workspace")"
+
+  # The container's user must own the workspace folder, or it cannot write there.
+  owner_uid="$(stat -c %u "$workspace")"
+  owner_gid="$(stat -c %g "$workspace")"
+  if [ "$owner_uid" = 0 ] || [ "$owner_gid" = 0 ]; then
+    if [ -n "$created" ]; then
+      chown 1000:1000 "$workspace"
+    else
+      warn "$workspace belongs to root, and the agents never run as root. Run: chown -R 1000:1000 '$workspace' (or pick another folder)."
+    fi
+    owner_uid=1000
+    owner_gid=1000
+  fi
+
+  local escaped
+  escaped="$(printf '%s' "$workspace" | sed 's/[&|\\]/\\&/g')"
+  sed -e "s|^WORKSPACE_PATH=.*|WORKSPACE_PATH=$escaped|" \
+      -e "s|^AGENT_UID=.*|AGENT_UID=$owner_uid|" \
+      -e "s|^AGENT_GID=.*|AGENT_GID=$owner_gid|" \
+      "$DIR/env.example" >"$(env_file)"
+  chmod 600 "$(env_file)"
+  say "Created $(env_file): workspace $workspace, user ids $owner_uid:$owner_gid."
+  say "Add your API keys there if you want them (KIRO_API_KEY, ANTHROPIC_API_KEY)."
+}
+
+ensure_ready() {
+  cmd_doctor >/dev/null
+  [ -f "$(env_file)" ] || cmd_init
+}
+
+cmd_up() {
+  ensure_ready
+  compose up -d "$@"
+  say ""
+  say "CloudCLI: http://localhost:$(env_value CLOUDCLI_PORT 3001)  (set a password on the first visit)"
+}
+
+cmd_down() {
+  [ -f "$(env_file)" ] || die "$(env_file) does not exist; nothing was started from $DIR."
+  local saved=("${PROFILES[@]}")
+  PROFILES=("${DIND_PROFILES[@]}")
+  compose down "$@"
+  PROFILES=("${saved[@]}")
+}
+
+cmd_pull() {
+  ensure_ready
+  compose pull "$@"
+}
+
+cmd_upgrade() {
+  ensure_ready
+  if ! compose pull; then
+    warn "could not pull the images; starting with the ones already on this machine."
+  fi
+  cmd_up
+}
+
+cmd_self_update() {
+  command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || die "curl or wget is needed."
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' EXIT
+  say "Downloading $DEPLOY_URL"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$DEPLOY_URL" -o "$tmp/deploy.tar.gz"
+  else
+    wget -q "$DEPLOY_URL" -O "$tmp/deploy.tar.gz"
+  fi
+  tar -xzf "$tmp/deploy.tar.gz" -C "$tmp"
+  local installer
+  installer="$(find "$tmp" -maxdepth 2 -name install.sh | head -n 1)"
+  [ -n "$installer" ] || die "the download has no install.sh."
+  # The installer replaces this script's file (by renaming, so this run is not disturbed),
+  # then the new copy does the upgrade.
+  bash "$installer" --dir "$DIR" --yes --no-start
+  rm -rf "$tmp"
+  trap - EXIT
+  exec "$DIR/cloudcli-docker" --dir "$DIR" upgrade
+}
+
+cmd_shell() {
+  ensure_ready
+  local service="${1:-cloudcli}"
+  if [ "$service" = cloudcli ]; then
+    compose exec -u agent cloudcli bash
+  else
+    compose exec "$service" sh
+  fi
+}
+
+cmd_env() {
+  say "Directory:      $DIR"
+  say "Settings:       $(env_file)"
+  say "Compose file:   $DIR/docker-compose.yml"
+  say "Your overrides: $DIR/docker-compose.override.yml (see docker-compose.override.example.yml)"
+}
+
+# ----------------------------------------------------------------------------
+# arguments
+# ----------------------------------------------------------------------------
+
+COMMAND=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -f | --file)
+      [ -n "${2:-}" ] || die "$1 needs a file."
+      [ -f "$2" ] || die "compose file not found: $2"
+      EXTRA_FILES+=("$(readlink -f "$2")")
+      shift 2
+      ;;
+    --dind) PROFILES=(docker-privileged); shift ;;
+    --dind=privileged) PROFILES=(docker-privileged); shift ;;
+    --dind=rootless) PROFILES=(docker); shift ;;
+    --dind=*) die "--dind takes privileged or rootless." ;;
+    --workspace)
+      [ -n "${2:-}" ] || die "--workspace needs a folder."
+      WORKSPACE="$2"
+      shift 2
+      ;;
+    -y | --yes) ASSUME_YES=1; shift ;;
+    --dir)
+      [ -n "${2:-}" ] || die "--dir needs a directory."
+      DIR="$(readlink -f "$2")"
+      shift 2
+      ;;
+    -h | --help | help) usage; exit 0 ;;
+    --) shift; break ;;
+    -*) die "unknown option $1 (see --help)." ;;
+    *) COMMAND="$1"; shift; break ;;
+  esac
+done
+
+[ -n "$COMMAND" ] || { usage; exit 1; }
+# `up -- --build` and `up --build` both pass --build on.
+[ "${1:-}" = "--" ] && shift
+
+case "$COMMAND" in
+  init) cmd_init ;;
+  doctor) cmd_doctor ;;
+  up) cmd_up "$@" ;;
+  down) cmd_down "$@" ;;
+  restart) cmd_down; cmd_up "$@" ;;
+  ps) ensure_ready; compose ps "$@" ;;
+  logs) ensure_ready; compose logs -f "$@" ;;
+  pull) cmd_pull "$@" ;;
+  upgrade) cmd_upgrade ;;
+  self-update) cmd_self_update ;;
+  shell) cmd_shell "$@" ;;
+  env) cmd_env ;;
+  compose) ensure_ready; compose "$@" ;;
+  *) die "unknown command '$COMMAND' (see --help)." ;;
+esac
