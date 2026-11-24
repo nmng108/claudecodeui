@@ -245,5 +245,47 @@
     "explainerTitle": "并行处理多个分支",
     "explainerDescription": "工作树会在独立文件夹中检出一个分支，因此您可以同时运行多个聊天会话，并在结果就绪时将其合并回来。",
     "createFirst": "创建您的第一个工作树"
+  },
+  "repositories": {
+    "switchTitle": "切换仓库",
+    "choose": "选择仓库",
+    "projectFolder": "项目文件夹",
+    "search": "搜索仓库...",
+    "noMatch": "没有匹配的仓库",
+    "rescan": "重新扫描仓库",
+    "truncated": "仅列出找到的前几个仓库。"
+  },
+  "remoteAccess": {
+    "title": "远程访问",
+    "checking": "检查中...",
+    "notChecked": "远程访问",
+    "checkNow": "检查访问权限",
+    "checkAgain": "重新检查",
+    "autoCheck": "打开仓库时检查",
+    "public": "公开仓库：无需凭据即可读取。",
+    "remote": "远程",
+    "checkedAt": "检查时间",
+    "state": {
+      "readWrite": "可读写",
+      "readOnly": "只读",
+      "readable": "可读取",
+      "noAccess": "无权限",
+      "notFound": "未找到",
+      "hostKey": "主机密钥",
+      "unreachable": "无法连接",
+      "noRemote": "无远程",
+      "error": "检查失败"
+    },
+    "hint": {
+      "readWrite": "预计可以拉取、获取和推送。分支保护只有真正推送时才会检查。",
+      "readOnly": "可以读取远程仓库，但当前使用的凭据无权推送。",
+      "readable": "可以读取远程仓库，但无法确定是否能够推送。",
+      "noAccess": "远程拒绝了当前使用的凭据，或未为其配置凭据。",
+      "notFound": "未找到该仓库，或当前使用的凭据看不到它。",
+      "hostKey": "SSH 服务器的主机密钥尚未受信任或已更改。请先用 ssh 连接一次以接受它。",
+      "unreachable": "远程没有响应。请检查网络和远程地址。",
+      "noRemote": "此仓库没有远程。",
+      "error": "访问检查失败。"
+    }
   }
 }
