@@ -51,7 +51,6 @@ env:
 jobs:
   release-please:
     name: Release PR
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -61,6 +60,9 @@ jobs:
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - id: release
+        # Not skipped as a whole job: a skipped job would also skip every job after it on a
+        # manual run (workflow_dispatch), which uses no release PR.
+        if: github.event_name == 'push'
         uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
         with:
           # A personal access token makes CI run on the release PR; GITHUB_TOKEN works too
@@ -316,7 +318,8 @@ jobs:
           ARGS=(--access public)
           # A prerelease must not become the version `npm install` picks.
           if [ "$PRERELEASE" = true ]; then ARGS+=(--tag next); fi
-          npm publish "$TARBALL" "${ARGS[@]}" --loglevel warn
+          # "./" is required: npm reads a bare pkg/x.tgz as a GitHub owner/repo and runs git.
+          npm publish "./$TARBALL" "${ARGS[@]}" --loglevel warn
 
   push:
     name: Push the app image (${{ matrix.arch }})
