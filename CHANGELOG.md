@@ -3,6 +3,13 @@
 All notable changes to CloudCLI UI will be documented in this file.
 
 
+## [1.39.1](https://github.com/nmng108/claudecodeui/compare/v1.39.0...v1.39.1) (2026-11-26)
+
+
+### Bug Fixes
+
+* **ci:** publish the tarball by path and let manual release runs reach the later jobs ([3084c67](https://github.com/nmng108/claudecodeui/commit/3084c670f042b6a7f871707c3279db070486e7ea))
+
 ## [1.39.0](https://github.com/nmng108/claudecodeui/compare/v1.38.0...v1.39.0) (2026-11-25)
 
 

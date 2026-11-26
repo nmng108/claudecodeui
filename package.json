@@ -1,6 +1,6 @@
 {
   "name": "@namng108/cloudcli",
-  "version": "1.39.0",
+  "version": "1.39.1",
   "productName": "CloudCLI",
   "publishConfig": {
     "access": "public"
